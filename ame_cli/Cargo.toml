@@ -1,0 +1,10 @@
+[package]
+name = "ame_cli"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+miette = { version = "7", features = ["fancy"] }
+ame_lexer = { path = "../ame_lexer" }
+ame_parser = { path = "../ame_parser" }
+ame_codegen_llvm = { path = "../ame_codegen_llvm" }

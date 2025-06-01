@@ -1,0 +1,8 @@
+[package]
+name = "ame_lexer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+unicode-xid = "0.2"
+

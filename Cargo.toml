@@ -1,0 +1,8 @@
+[workspace]
+resolver = "3"
+members = [
+    "ame_cli",
+    "ame_lexer",
+    "ame_parser",
+    "ame_codegen_llvm",
+]
