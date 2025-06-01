@@ -6,3 +6,10 @@ members = [
     "ame_parser",
     "ame_codegen_llvm",
 ]
+
+[workspace.package]
+authors = ["Deathlesz"]
+edition = "2024"
+license = "MIT OR Apache-2.0"
+keywords = ["compiler", "language", "ame"]
+readme = "README.md"

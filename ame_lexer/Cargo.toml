@@ -1,7 +1,11 @@
 [package]
 name = "ame_lexer"
 version = "0.1.0"
-edition = "2021"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+keyword.workspace = true
+readme.workspace = true
 
 [dependencies]
 unicode-xid = "0.2"
