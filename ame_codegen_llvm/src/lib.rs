@@ -1,16 +1,19 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, path::PathBuf};
 
 pub use inkwell::context::Context;
 use inkwell::{
     builder::Builder,
     module::Module,
-    targets::{Target, TargetMachine},
+    targets::{Target, TargetMachine, TargetTriple},
     values::{BasicValue, BasicValueEnum, FunctionValue},
     IntPredicate,
 };
 
 use ame_lexer::LiteralKind;
 use ame_parser::{AssignOp, BinOp, Expr, ExprKind, Stmt, StmtKind, VarDecl};
+
+mod options;
+pub use options::*;
 
 pub struct CodeGen<'a, 'ctx> {
     ast: &'a [Stmt],
@@ -38,7 +41,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    pub fn generate(&mut self) {
+    pub fn generate(&mut self, options: CodeGenOptions) {
         let i32_type = self.context.i32_type();
 
         let main_fn_type = i32_type.fn_type(&[], false);
@@ -113,9 +116,26 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         Target::initialize_all(&inkwell::targets::InitializationConfig::default());
 
-        let target_triple = TargetMachine::get_default_triple();
-        let cpu = TargetMachine::get_host_cpu_name().to_string();
-        let features = TargetMachine::get_host_cpu_features().to_string(); // "+cmov,+cx8,+fxsr,+mmx,+sse,+sse2", // x86_64-v1 (baseline)
+        let target_triple = options
+            .target
+            .as_ref()
+            .and_then(|target| Some(TargetTriple::create(target)))
+            .unwrap_or_else(|| TargetMachine::get_default_triple());
+
+        let cpu = options
+            .target
+            .unwrap_or_else(|| TargetMachine::get_host_cpu_name().to_string());
+
+        let features = options
+            .features
+            .and_then(|features| {
+                Some(if features == "native" {
+                    TargetMachine::get_host_cpu_features().to_string()
+                } else {
+                    features
+                })
+            })
+            .unwrap_or_else(|| "+cmov,+cx8,+fxsr,+mmx,+sse,+sse2".into());
 
         let target = Target::from_triple(&target_triple).unwrap();
         let target_machine = target
@@ -123,7 +143,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 &target_triple,
                 &cpu,
                 &features,
-                inkwell::OptimizationLevel::Default,
+                if options.optimize {
+                    inkwell::OptimizationLevel::Aggressive
+                } else {
+                    inkwell::OptimizationLevel::None
+                },
                 inkwell::targets::RelocMode::PIC, // NOTE: needs -fPIE if using ::Default
                 inkwell::targets::CodeModel::Default,
             )
@@ -133,24 +157,31 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         self.module
             .set_data_layout(&target_machine.get_target_data().get_data_layout());
 
-        // self.module.run_passes("annotation2metadata,forceattrs,inferattrs,function<eager-inv>(lower-expect,simplifycfg,early-cse),openmp-opt,ipsccp,called-value-propagation,globalopt,function<eager-inv>(instcombine<no-verify-fixpoint>,simplifycfg),always-inline,require<globals-aa>,function(invalidate<aa>),require<profile-summary>,cgscc(devirt<4>(inline,function-attrs,openmp-opt-cgscc,function<eager-inv;no-rerun>(early-cse<memssa>,speculative-execution,jump-threading,correlated-propagation,simplifycfg,instcombine<no-verify-fixpoint>,aggressive-instcombine,libcalls-shrinkwrap,tailcallelim,simplifycfg,reassociate,constraint-elimination,loop-mssa(loop-instsimplify,loop-simplifycfg,licm<no-allowspeculation>,loop-rotate<header-duplication;no-prepare-for-lto>,licm<allowspeculation>,simple-loop-unswitch<no-nontrivial;trivial>),simplifycfg,instcombine<no-verify-fixpoint>,loop(loop-idiom,indvars,loop-deletion,loop-unroll-full),vector-combine,mldst-motion<no-split-footer-bb>,sccp,bdce,instcombine<no-verify-fixpoint>,jump-threading,correlated-propagation,adce,memcpyopt,dse,move-auto-init,loop-mssa(licm<allowspeculation>),simplifycfg,instcombine<no-verify-fixpoint>),function-attrs,function(require<should-not-run-function-passes>))),deadargelim,globalopt,globaldce,elim-avail-extern,rpo-function-attrs,recompute-globalsaa,function<eager-inv>(lower-constant-intrinsics,loop(loop-rotate<header-duplication;no-prepare-for-lto>,loop-deletion),loop-distribute,inject-tli-mappings,loop-vectorize<no-interleave-forced-only;no-vectorize-forced-only>,infer-alignment,loop-load-elim,instcombine<no-verify-fixpoint>,simplifycfg,slp-vectorizer,vector-combine,instcombine<no-verify-fixpoint>,loop-unroll<O2>,transform-warning,loop-mssa(licm<allowspeculation>),infer-alignment,alignment-from-assumptions,loop-sink,instsimplify,div-rem-pairs,tailcallelim,simplifycfg),globaldce,constmerge,cg-profile,rel-lookup-table-converter,function(annotation-remarks),verify", &target_machine, inkwell::passes::PassBuilderOptions::create()).unwrap();
+        if options.optimize {
+            self.module.run_passes("annotation2metadata,forceattrs,inferattrs,function<eager-inv>(lower-expect,simplifycfg,early-cse),openmp-opt,ipsccp,called-value-propagation,globalopt,function<eager-inv>(instcombine<no-verify-fixpoint>,simplifycfg),always-inline,require<globals-aa>,function(invalidate<aa>),require<profile-summary>,cgscc(devirt<4>(inline,function-attrs,openmp-opt-cgscc,function<eager-inv;no-rerun>(early-cse<memssa>,speculative-execution,jump-threading,correlated-propagation,simplifycfg,instcombine<no-verify-fixpoint>,aggressive-instcombine,libcalls-shrinkwrap,tailcallelim,simplifycfg,reassociate,constraint-elimination,loop-mssa(loop-instsimplify,loop-simplifycfg,licm<no-allowspeculation>,loop-rotate<header-duplication;no-prepare-for-lto>,licm<allowspeculation>,simple-loop-unswitch<no-nontrivial;trivial>),simplifycfg,instcombine<no-verify-fixpoint>,loop(loop-idiom,indvars,loop-deletion,loop-unroll-full),vector-combine,mldst-motion<no-split-footer-bb>,sccp,bdce,instcombine<no-verify-fixpoint>,jump-threading,correlated-propagation,adce,memcpyopt,dse,move-auto-init,loop-mssa(licm<allowspeculation>),simplifycfg,instcombine<no-verify-fixpoint>),function-attrs,function(require<should-not-run-function-passes>))),deadargelim,globalopt,globaldce,elim-avail-extern,rpo-function-attrs,recompute-globalsaa,function<eager-inv>(lower-constant-intrinsics,loop(loop-rotate<header-duplication;no-prepare-for-lto>,loop-deletion),loop-distribute,inject-tli-mappings,loop-vectorize<no-interleave-forced-only;no-vectorize-forced-only>,infer-alignment,loop-load-elim,instcombine<no-verify-fixpoint>,simplifycfg,slp-vectorizer,vector-combine,instcombine<no-verify-fixpoint>,loop-unroll<O2>,transform-warning,loop-mssa(licm<allowspeculation>),infer-alignment,alignment-from-assumptions,loop-sink,instsimplify,div-rem-pairs,tailcallelim,simplifycfg),globaldce,constmerge,cg-profile,rel-lookup-table-converter,function(annotation-remarks),verify", &target_machine, inkwell::passes::PassBuilderOptions::create()).unwrap();
+        }
 
-        // NOTE: also for testing right now
-        std::fs::write("stuff.ll", self.module.to_string()).unwrap();
-        target_machine
-            .write_to_file(
-                &self.module,
-                inkwell::targets::FileType::Assembly,
-                "stuff.asm".as_ref(),
-            )
-            .unwrap();
-        target_machine
-            .write_to_file(
-                &self.module,
-                inkwell::targets::FileType::Object,
-                "stuff.o".as_ref(),
-            )
-            .unwrap();
+        let output = options.output.unwrap_or_else(|| {
+            "out"
+                .parse::<PathBuf>()
+                .unwrap()
+                .with_extension(options.output_kind.extension())
+        });
+        match options.output_kind {
+            OutputKind::Object => {
+                target_machine
+                    .write_to_file(&self.module, inkwell::targets::FileType::Object, &output)
+                    .unwrap();
+            }
+            OutputKind::LLVMIr => {
+                std::fs::write(output, self.module.to_string()).unwrap();
+            }
+            OutputKind::Assembly => {
+                target_machine
+                    .write_to_file(&self.module, inkwell::targets::FileType::Assembly, &output)
+                    .unwrap();
+            }
+        }
     }
 
     fn generate_stmts(&mut self, stmts: &'a [Stmt], func: FunctionValue<'ctx>) {

@@ -1,8 +1,11 @@
-use miette::{miette, IntoDiagnostic, Result, WrapErr};
+use clap::Parser as _;
+use miette::{IntoDiagnostic, Result, WrapErr};
 
 use ame_codegen_llvm::{CodeGen, Context};
 use ame_lexer::tokenize;
 use ame_parser::Parser;
+
+mod cli;
 
 fn main() -> Result<()> {
     miette::set_hook(Box::new(|_| {
@@ -13,10 +16,11 @@ fn main() -> Result<()> {
         )
     }))?;
 
-    let source_path = std::env::args().nth(1).ok_or(miette!("no source file"))?;
-    let source = std::fs::read_to_string(&source_path)
+    let args = cli::Args::parse();
+
+    let source = std::fs::read_to_string(&args.source)
         .into_diagnostic()
-        .wrap_err_with(|| format!("failed to read from `{}`", source_path))?;
+        .wrap_err_with(|| format!("failed to read from `{}`", args.source.display()))?;
 
     let tokens = tokenize(&source).collect::<Vec<_>>();
 
@@ -27,11 +31,11 @@ fn main() -> Result<()> {
         .wrap_err("failed to parse")?;
 
     let context = Context::create();
-    let module = context.create_module("ame");
+    let module = context.create_module(args.source.file_stem().unwrap().to_str().unwrap());
     let builder = context.create_builder();
     let mut codegen = CodeGen::new(&ast, &context, module, builder);
 
-    codegen.generate();
+    codegen.generate(args.into());
 
     Ok(())
 }

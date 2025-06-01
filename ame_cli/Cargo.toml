@@ -5,6 +5,8 @@ edition = "2021"
 
 [dependencies]
 miette = { version = "7", features = ["fancy"] }
+clap = { version = "4.5", features = ["derive"] }
+
 ame_lexer = { path = "../ame_lexer" }
 ame_parser = { path = "../ame_parser" }
 ame_codegen_llvm = { path = "../ame_codegen_llvm" }
