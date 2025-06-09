@@ -1,13 +1,8 @@
 [package]
-name = "ame_parser"
+name = "ame_types"
 version = "0.1.0"
 authors.workspace = true
 edition.workspace = true
 license.workspace = true
 keywords.workspace = true
 readme.workspace = true
-
-[dependencies]
-ame_lexer = { path = "../ame_lexer" }
-ame_ast = { path = "../ame_ast" }
-ame_types = { path = "../ame_types" }

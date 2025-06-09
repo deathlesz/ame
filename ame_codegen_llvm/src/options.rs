@@ -19,6 +19,7 @@ pub enum OutputKind {
 }
 
 impl OutputKind {
+    #[inline]
     pub const fn extension(&self) -> &str {
         match self {
             Self::Object => "o",

@@ -1,6 +1,6 @@
-use crate::ast::{Expr, ExprKind, Stmt, StmtKind, VarDecl};
-
+use ame_ast::{Expr, ExprKind, Stmt, StmtKind, VarDecl};
 use ame_lexer::{Keyword, Span, Token, TokenKind};
+use ame_types::Type;
 
 type Result<T> = std::result::Result<T, ParseError>;
 
@@ -11,16 +11,19 @@ pub struct Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
+    #[inline]
     pub const fn new(tokens: &'a [Token]) -> Self {
         Self { tokens, pos: 0 }
     }
 
     // `Token { kind: TokeKind::Eof, .. }` is always present at the end
     // so parsing can stop there without requiring these functions to return `Option`
+    #[inline]
     const fn peek(&self) -> &Token {
         &self.tokens[self.pos]
     }
 
+    #[inline]
     const fn next(&mut self) -> &Token {
         let token = &self.tokens[self.pos];
         self.pos += 1;
@@ -28,6 +31,7 @@ impl<'a> Parser<'a> {
         token
     }
 
+    #[inline]
     fn at(&self, kind: &TokenKind) -> bool {
         &self.peek().kind == kind
     }
@@ -125,7 +129,7 @@ impl<'a> Parser<'a> {
         Ok(Stmt {
             kind: StmtKind::VarDecl(VarDecl {
                 name,
-                ty,
+                ty: ty.map(|ty| ty.into()).unwrap_or(Type::Unknown),
                 init_expr,
             }),
         })
@@ -197,6 +201,7 @@ impl<'a> Parser<'a> {
 
             let op = self.next().clone();
             match op.kind {
+                // TODO: add more operators
                 TokenKind::Assign
                 | TokenKind::PlusAssign
                 | TokenKind::MinusAssign
@@ -214,6 +219,7 @@ impl<'a> Parser<'a> {
                             lhs: Box::new(lhs),
                             rhs: Box::new(rhs),
                         },
+                        ty: Type::default(),
                     }
                 }
                 TokenKind::Plus
@@ -234,6 +240,7 @@ impl<'a> Parser<'a> {
                             Box::new(lhs),
                             Box::new(rhs),
                         ),
+                        ty: Type::default(),
                     };
                 }
                 _ => todo!(),
@@ -249,6 +256,7 @@ impl<'a> Parser<'a> {
         match &token.kind {
             TokenKind::Literal { kind } => Ok(Expr {
                 kind: ExprKind::Literal(kind.clone()),
+                ty: Type::default(),
             }),
             TokenKind::Lparen => {
                 let expr = self.parse_expr(0);
@@ -258,6 +266,7 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Ident(name) => Ok(Expr {
                 kind: ExprKind::Variable(name.clone()),
+                ty: Type::default(),
             }),
             got => Err(ParseError::Unexpected {
                 got: got.clone(),
@@ -268,7 +277,9 @@ impl<'a> Parser<'a> {
     }
 }
 
+#[inline]
 const fn infix_binding_power(op: &Token) -> Option<(u8, u8)> {
+    // TODO: add more operators
     match op.kind {
         TokenKind::Assign
         | TokenKind::PlusAssign
@@ -298,6 +309,7 @@ pub enum ParseError {
 }
 
 impl std::fmt::Display for ParseError {
+    #[inline]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Unexpected {

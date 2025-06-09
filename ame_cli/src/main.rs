@@ -1,3 +1,5 @@
+use ame_ast::Inferrer;
+use ame_types::TypeCtx;
 use clap::Parser as _;
 use miette::{IntoDiagnostic, Result, WrapErr};
 
@@ -25,15 +27,23 @@ fn main() -> Result<()> {
     let tokens = tokenize(&source).collect::<Vec<_>>();
 
     let mut parser = Parser::new(&tokens);
-    let ast = parser
+    let mut ast = parser
         .parse()
         .into_diagnostic()
         .wrap_err("failed to parse")?;
 
+    let mut tcx = TypeCtx::new();
+    let mut inferrer = Inferrer::new(&mut tcx);
+    inferrer
+        .infer(&mut ast)
+        .into_diagnostic()
+        .wrap_err("failed to infer types")?;
+    inferrer.resolve(&mut ast);
+
     let context = Context::create();
     let module = context.create_module(args.source.file_stem().unwrap().to_str().unwrap());
     let builder = context.create_builder();
-    let mut codegen = CodeGen::new(&ast, &context, module, builder);
+    let mut codegen = CodeGen::new(&ast, tcx, &context, module, builder);
 
     codegen.generate(args.into());
 

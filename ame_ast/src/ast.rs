@@ -1,6 +1,5 @@
-#![allow(unused)]
-
 use ame_lexer::{LiteralKind, Token, TokenKind};
+use ame_types::Type;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Stmt {
@@ -10,6 +9,7 @@ pub struct Stmt {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Expr {
     pub kind: ExprKind,
+    pub ty: Type,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,7 +41,7 @@ pub enum ExprKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VarDecl {
     pub name: String,
-    pub ty: Option<String>,
+    pub ty: Type,
     pub init_expr: Option<Expr>,
 }
 
@@ -54,8 +54,6 @@ pub enum AssignOp {
     Mul,
     Div,
     Rem,
-    And,
-    Or,
     BitXor,
     BitAnd,
     BitOr,
@@ -66,6 +64,7 @@ pub enum AssignOp {
 impl TryFrom<&Token> for AssignOp {
     type Error = ();
 
+    #[inline]
     fn try_from(token: &Token) -> Result<Self, Self::Error> {
         match token.kind {
             TokenKind::Assign => Ok(AssignOp::Assign),
@@ -74,7 +73,7 @@ impl TryFrom<&Token> for AssignOp {
             TokenKind::AsteriskAssign => Ok(AssignOp::Mul),
             TokenKind::SlashAssign => Ok(AssignOp::Div),
 
-            _ => Err(()),
+            _ => todo!("add more Token -> AssignOp conversions"),
         }
     }
 }
@@ -82,6 +81,7 @@ impl TryFrom<&Token> for AssignOp {
 impl TryFrom<Token> for AssignOp {
     type Error = ();
 
+    #[inline]
     fn try_from(token: Token) -> Result<Self, Self::Error> {
         (&token).try_into()
     }
@@ -112,6 +112,7 @@ pub enum BinOp {
 impl TryFrom<&Token> for BinOp {
     type Error = ();
 
+    #[inline]
     fn try_from(token: &Token) -> Result<Self, Self::Error> {
         match token.kind {
             TokenKind::Plus => Ok(BinOp::Add),
@@ -125,7 +126,8 @@ impl TryFrom<&Token> for BinOp {
             TokenKind::Lt => Ok(BinOp::Lt),
             TokenKind::Ge => Ok(BinOp::Ge),
             TokenKind::Gt => Ok(BinOp::Gt),
-            _ => todo!(),
+
+            _ => todo!("add more Token -> BinOp conversions"),
         }
     }
 }
@@ -133,6 +135,7 @@ impl TryFrom<&Token> for BinOp {
 impl TryFrom<Token> for BinOp {
     type Error = ();
 
+    #[inline]
     fn try_from(token: Token) -> Result<Self, Self::Error> {
         (&token).try_into()
     }
@@ -141,13 +144,15 @@ impl TryFrom<Token> for BinOp {
 impl TryFrom<&AssignOp> for BinOp {
     type Error = ();
 
+    #[inline]
     fn try_from(op: &AssignOp) -> Result<Self, Self::Error> {
         match op {
             AssignOp::Add => Ok(BinOp::Add),
             AssignOp::Sub => Ok(BinOp::Sub),
             AssignOp::Mul => Ok(BinOp::Mul),
             AssignOp::Div => Ok(BinOp::Div),
-            _ => todo!(),
+
+            _ => todo!("add more AssignOp -> BinOp conversions"),
         }
     }
 }
@@ -155,6 +160,7 @@ impl TryFrom<&AssignOp> for BinOp {
 impl TryFrom<AssignOp> for BinOp {
     type Error = ();
 
+    #[inline]
     fn try_from(op: AssignOp) -> Result<Self, Self::Error> {
         (&op).try_into()
     }

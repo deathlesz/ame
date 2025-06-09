@@ -1,5 +1,5 @@
 [package]
-name = "ame_cli"
+name = "ame_ast"
 version = "0.1.0"
 authors.workspace = true
 edition.workspace = true
@@ -8,11 +8,5 @@ keywords.workspace = true
 readme.workspace = true
 
 [dependencies]
-miette = { version = "7", features = ["fancy"] }
-clap = { version = "4.5", features = ["derive"] }
-
 ame_lexer = { path = "../ame_lexer" }
-ame_ast = { path = "../ame_ast" }
-ame_parser = { path = "../ame_parser" }
-ame_codegen_llvm = { path = "../ame_codegen_llvm" }
 ame_types = { path = "../ame_types" }

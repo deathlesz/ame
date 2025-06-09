@@ -5,6 +5,7 @@ pub struct Token {
 }
 
 impl Token {
+    #[inline]
     pub fn new(kind: TokenKind, span: Span) -> Self {
         Self { kind, span }
     }
@@ -107,6 +108,7 @@ pub enum Keyword {
 impl std::str::FromStr for Keyword {
     type Err = ();
 
+    #[inline]
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "let" => Ok(Keyword::Let),
@@ -125,6 +127,7 @@ pub struct Span {
 }
 
 impl Span {
+    #[inline]
     pub fn new(start: usize, end: usize) -> Self {
         Self { start, end }
     }

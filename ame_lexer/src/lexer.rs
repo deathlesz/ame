@@ -10,6 +10,7 @@ struct Lexer<'a> {
 }
 
 impl<'a> Lexer<'a> {
+    #[inline]
     fn new(src: &'a str) -> Self {
         Self {
             src,
@@ -18,6 +19,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    #[inline]
     fn bump(&mut self) -> Option<char> {
         let c = self.chars.next()?;
         self.pos += c.len_utf8();
@@ -25,14 +27,17 @@ impl<'a> Lexer<'a> {
         Some(c)
     }
 
+    #[inline]
     fn peek(&self) -> char {
         self.chars.clone().next().unwrap_or(EOF)
     }
 
+    #[inline]
     fn is_eof(&self) -> bool {
         self.chars.as_str().is_empty()
     }
 
+    #[inline]
     fn eat_while(&mut self, mut predicate: impl FnMut(char) -> bool) {
         while predicate(self.peek()) && !self.is_eof() {
             self.bump();
@@ -118,13 +123,13 @@ impl<'a> Lexer<'a> {
                 TokenKind::Literal { kind }
             }
             '"' => {
-                self.bump();
-
                 let (value, terminated) = self.string();
                 let kind = LiteralKind::String { terminated, value };
 
                 TokenKind::Literal { kind }
             }
+
+            // TODO: add more operators later
             '+' => or_assign!(TokenKind::PlusAssign, TokenKind::Plus),
             '-' => or_assign!(TokenKind::MinusAssign, TokenKind::Minus),
             '*' => or_assign!(TokenKind::AsteriskAssign, TokenKind::Asterisk),

@@ -18,12 +18,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "512761e0bb2578dd7380c6baaa0f4ce03e84f95e960231d1dec8bf4d7d6e2627"
 
 [[package]]
+name = "ame_ast"
+version = "0.1.0"
+dependencies = [
+ "ame_lexer",
+ "ame_types",
+]
+
+[[package]]
 name = "ame_cli"
 version = "0.1.0"
 dependencies = [
+ "ame_ast",
  "ame_codegen_llvm",
  "ame_lexer",
  "ame_parser",
+ "ame_types",
  "clap",
  "miette",
 ]
@@ -32,8 +42,9 @@ dependencies = [
 name = "ame_codegen_llvm"
 version = "0.1.0"
 dependencies = [
+ "ame_ast",
  "ame_lexer",
- "ame_parser",
+ "ame_types",
  "inkwell",
  "thiserror 2.0.12",
 ]
@@ -49,8 +60,14 @@ dependencies = [
 name = "ame_parser"
 version = "0.1.0"
 dependencies = [
+ "ame_ast",
  "ame_lexer",
+ "ame_types",
 ]
+
+[[package]]
+name = "ame_types"
+version = "0.1.0"
 
 [[package]]
 name = "anstream"

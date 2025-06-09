@@ -12,7 +12,8 @@ thiserror = "2"
 inkwell = { version = "0.6", features = ["llvm18-1"] }
 
 ame_lexer = { path = "../ame_lexer" }
-ame_parser = { path = "../ame_parser" }
+ame_ast = { path = "../ame_ast" }
+ame_types = { path = "../ame_types" }
 
 [features]
 dynamic-linking = ["inkwell/llvm18-1-prefer-dynamic"]

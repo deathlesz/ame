@@ -24,6 +24,7 @@ pub struct Args {
 }
 
 impl From<Args> for CodeGenOptions {
+    #[inline]
     fn from(
         Args {
             output,
@@ -56,6 +57,7 @@ pub enum Emit {
 }
 
 impl From<Emit> for OutputKind {
+    #[inline]
     fn from(emit: Emit) -> Self {
         match emit {
             Emit::Object => Self::Object,
