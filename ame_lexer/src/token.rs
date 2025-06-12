@@ -58,9 +58,6 @@ pub enum TokenKind {
     Ident(String),
     Keyword(Keyword),
 
-    LineComment,
-    BlockComment { terminated: bool },
-
     Unknown(char),
     Eof,
 }
@@ -81,12 +78,6 @@ pub enum LiteralKind {
         terminated: bool,
         value: String,
     },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum NumberKind {
-    Int { base: Base, empty: bool },
-    Float { base: Base, empty_exp: bool },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

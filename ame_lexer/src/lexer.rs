@@ -1,10 +1,9 @@
-use crate::token::{Base, Keyword, LiteralKind, NumberKind, Span, Token, TokenKind};
+use crate::token::{Base, Keyword, LiteralKind, Span, Token, TokenKind};
 
 const EOF: char = '\0';
 
 #[derive(Debug)]
 struct Lexer<'a> {
-    src: &'a str,
     chars: std::str::Chars<'a>,
     pos: usize,
 }
@@ -13,7 +12,6 @@ impl<'a> Lexer<'a> {
     #[inline]
     fn new(src: &'a str) -> Self {
         Self {
-            src,
             chars: src.chars(),
             pos: 0,
         }
@@ -45,24 +43,49 @@ impl<'a> Lexer<'a> {
     }
 
     fn next(&mut self) -> Token {
-        let start_pos = self.pos;
+        let mut start_pos = self.pos;
 
         let first;
         loop {
             match self.bump() {
                 Some(c) if c.is_whitespace() => {
+                    start_pos += c.len_utf8();
                     continue;
                 }
+                Some(c) if c == '/' => match self.peek() {
+                    '/' => {
+                        self.eat_while(|c| c != '\n');
+                        start_pos = self.pos; // self.pos was advanced when skipping comment
+
+                        continue;
+                    }
+                    '*' => {
+                        while let Some(c) = self.bump() {
+                            if c == '*' && self.peek() == '/' {
+                                self.bump();
+                                break;
+                            }
+                        }
+
+                        start_pos = self.pos; // self.pos was advanced when skipping comment
+                    }
+                    '=' => {
+                        self.bump();
+
+                        return Token::new(TokenKind::SlashAssign, Span::new(start_pos, self.pos));
+                    }
+                    _ => return Token::new(TokenKind::Slash, Span::new(start_pos, self.pos)),
+                },
                 Some(c) => {
                     first = c;
                     break;
                 }
                 None => return Token::new(TokenKind::Eof, Span::new(self.pos, self.pos)),
-            };
+            }
         }
 
         macro_rules! or_assign {
-            ($assign:expr,$no_assign:expr) => {
+            ($assign:expr, $no_assign:expr) => {
                 if (self.peek() == '=') {
                     self.bump();
                     $assign
@@ -73,20 +96,6 @@ impl<'a> Lexer<'a> {
         }
 
         let kind = match first {
-            '/' => match self.peek() {
-                '/' => {
-                    self.eat_while(|c| c != '\n');
-
-                    TokenKind::LineComment
-                }
-                '*' => self.block_comment(),
-                '=' => {
-                    self.bump();
-
-                    TokenKind::SlashAssign
-                }
-                _ => TokenKind::Slash,
-            },
             c if unicode_xid::UnicodeXID::is_xid_start(c) => {
                 let mut ident = String::from(c);
 
@@ -108,17 +117,7 @@ impl<'a> Lexer<'a> {
                 }
             }
             c @ '0'..='9' => {
-                let number_kind = self.number(c);
-                let value = self.src[start_pos..self.pos].to_string();
-
-                let kind = match number_kind {
-                    NumberKind::Int { base, empty } => LiteralKind::Int { base, empty, value },
-                    NumberKind::Float { base, empty_exp } => LiteralKind::Float {
-                        base,
-                        empty_exp,
-                        value,
-                    },
-                };
+                let kind = self.number(c);
 
                 TokenKind::Literal { kind }
             }
@@ -160,96 +159,122 @@ impl<'a> Lexer<'a> {
             c => TokenKind::Unknown(c),
         };
 
-        let token = Token::new(kind, Span::new(start_pos, self.pos));
-
-        token
+        Token::new(kind, Span::new(start_pos, self.pos))
     }
 
-    fn block_comment(&mut self) -> TokenKind {
-        while let Some(c) = self.bump() {
-            if c == '*' && self.peek() == '/' {
-                self.bump();
-                return TokenKind::BlockComment { terminated: true };
-            }
-        }
-
-        TokenKind::BlockComment { terminated: true }
-    }
-
-    fn number(&mut self, d: char) -> NumberKind {
-        use {Base::*, NumberKind::*};
-
-        let mut base = Decimal;
+    fn number(&mut self, d: char) -> LiteralKind {
+        let mut number = String::from(d);
+        let mut base = Base::Decimal;
 
         if d == '0' {
             match self.peek() {
                 'b' | 'B' => {
-                    base = Binary;
+                    base = Base::Binary;
                     self.bump();
-                    if !self.eat_based_digits(2) {
-                        return Int { base, empty: true };
+                    if !self.eat_based_digits(2, &mut number) {
+                        return LiteralKind::Int {
+                            base,
+                            empty: true,
+                            value: number,
+                        };
                     }
                 }
                 'o' | 'O' => {
-                    base = Octal;
+                    base = Base::Octal;
                     self.bump();
-                    if !self.eat_based_digits(8) {
-                        return Int { base, empty: true };
+                    if !self.eat_based_digits(8, &mut number) {
+                        return LiteralKind::Int {
+                            base,
+                            empty: true,
+                            value: number,
+                        };
                     }
                 }
                 'x' | 'X' => {
-                    base = Hexadecimal;
+                    base = Base::Hexadecimal;
                     self.bump();
-                    if !self.eat_based_digits(16) {
-                        return Int { base, empty: true };
+                    if !self.eat_based_digits(16, &mut number) {
+                        return LiteralKind::Int {
+                            base,
+                            empty: true,
+                            value: number,
+                        };
                     }
                 }
                 '0'..='9' | '_' => {
-                    self.eat_based_digits(10);
+                    if !self.eat_based_digits(10, &mut number) {
+                        return LiteralKind::Int {
+                            base,
+                            empty: true,
+                            value: number,
+                        };
+                    }
                 }
                 '.' | 'e' | 'E' => {} // not a base prefix, we're dealing with a float/double here
-                _ => return Int { base, empty: false }, // 0
+                _ => {
+                    return LiteralKind::Int {
+                        base,
+                        empty: false,
+                        value: number,
+                    };
+                } // 0
             }
         } else {
             // no base prefix
-            self.eat_based_digits(10);
+            self.eat_based_digits(10, &mut number);
         }
 
         let mut empty_exp = false;
         match self.peek() {
             '.' => {
-                self.bump();
+                number.push(self.bump().expect("we know it's not None"));
 
                 if self.peek().is_ascii_digit() {
-                    self.eat_based_digits(10);
+                    self.eat_based_digits(10, &mut number);
 
                     match self.peek() {
                         'e' | 'E' => {
-                            self.bump();
-                            empty_exp = !self.eat_float_exponent();
+                            number.push(self.bump().expect("we know it's not None"));
+                            empty_exp = !self.eat_float_exponent(&mut number);
                         }
                         _ => {}
                     }
                 }
 
-                Float { base, empty_exp }
+                LiteralKind::Float {
+                    base,
+                    empty_exp,
+                    value: number,
+                }
             }
             'e' | 'E' => {
-                self.bump();
-                empty_exp = !self.eat_float_exponent();
-                Float { base, empty_exp }
+                number.push(self.bump().expect("we know it's not None"));
+                empty_exp = !self.eat_float_exponent(&mut number);
+
+                LiteralKind::Float {
+                    base,
+                    empty_exp,
+                    value: number,
+                }
             }
-            _ => Int { base, empty: false },
+            _ => LiteralKind::Int {
+                base,
+                empty: false,
+                value: number,
+            },
         }
     }
 
-    fn eat_based_digits(&mut self, base: u32) -> bool {
+    fn eat_based_digits(&mut self, base: u32, string: &mut String) -> bool {
         let mut has_digits = false;
         let predicate = |c: char| c.is_digit(base);
 
         loop {
             match self.peek() {
-                c if predicate(c) => has_digits = true,
+                c if predicate(c) => {
+                    has_digits = true;
+                    string.push(c);
+                }
                 '_' => {}
                 _ => break,
             }
@@ -259,12 +284,12 @@ impl<'a> Lexer<'a> {
         has_digits
     }
 
-    fn eat_float_exponent(&mut self) -> bool {
+    fn eat_float_exponent(&mut self, string: &mut String) -> bool {
         if self.peek() == '-' || self.peek() == '+' {
-            self.bump();
+            string.push(self.bump().expect("we know it's not None"));
         }
 
-        self.eat_based_digits(10)
+        self.eat_based_digits(10, string)
     }
 
     fn string(&mut self) -> (String, bool) {
