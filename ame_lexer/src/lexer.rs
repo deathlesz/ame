@@ -86,7 +86,7 @@ impl<'a> Lexer<'a> {
 
         macro_rules! or_assign {
             ($assign:expr, $no_assign:expr) => {
-                if (self.peek() == '=') {
+                if self.peek() == '=' {
                     self.bump();
                     $assign
                 } else {
@@ -96,7 +96,7 @@ impl<'a> Lexer<'a> {
         }
 
         let kind = match first {
-            c if unicode_xid::UnicodeXID::is_xid_start(c) => {
+            c if c == '_' || unicode_xid::UnicodeXID::is_xid_start(c) => {
                 let mut ident = String::from(c);
 
                 loop {
@@ -133,8 +133,32 @@ impl<'a> Lexer<'a> {
             '-' => or_assign!(TokenKind::MinusAssign, TokenKind::Minus),
             '*' => or_assign!(TokenKind::AsteriskAssign, TokenKind::Asterisk),
             '%' => or_assign!(TokenKind::PercentAssign, TokenKind::Percent),
-            '&' => or_assign!(TokenKind::AndAssign, TokenKind::And),
-            '|' => or_assign!(TokenKind::OrAssign, TokenKind::Or),
+            '&' => {
+                if self.peek() == '=' {
+                    self.bump();
+
+                    TokenKind::AmpAssign
+                } else if self.peek() == '&' {
+                    self.bump();
+
+                    TokenKind::And
+                } else {
+                    TokenKind::Amp
+                }
+            }
+            '|' => {
+                if self.peek() == '=' {
+                    self.bump();
+
+                    TokenKind::PipeAssign
+                } else if self.peek() == '|' {
+                    self.bump();
+
+                    TokenKind::Or
+                } else {
+                    TokenKind::Pipe
+                }
+            }
             '^' => or_assign!(TokenKind::CaretAssign, TokenKind::Caret),
 
             '=' => or_assign!(TokenKind::Eq, TokenKind::Assign),
@@ -163,7 +187,7 @@ impl<'a> Lexer<'a> {
     }
 
     fn number(&mut self, d: char) -> LiteralKind {
-        let mut number = String::from(d);
+        let mut number = String::new();
         let mut base = Base::Decimal;
 
         if d == '0' {
@@ -202,6 +226,8 @@ impl<'a> Lexer<'a> {
                     }
                 }
                 '0'..='9' | '_' => {
+                    number.push(d);
+
                     if !self.eat_based_digits(10, &mut number) {
                         return LiteralKind::Int {
                             base,
@@ -210,8 +236,12 @@ impl<'a> Lexer<'a> {
                         };
                     }
                 }
-                '.' | 'e' | 'E' => {} // not a base prefix, we're dealing with a float/double here
+                '.' | 'e' | 'E' => {
+                    number.push(d);
+                } // not a base prefix, we're dealing with a float/double here
                 _ => {
+                    number.push(d);
+
                     return LiteralKind::Int {
                         base,
                         empty: false,
@@ -221,6 +251,8 @@ impl<'a> Lexer<'a> {
             }
         } else {
             // no base prefix
+            number.push(d);
+
             self.eat_based_digits(10, &mut number);
         }
 
