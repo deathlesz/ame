@@ -387,3 +387,189 @@ pub fn tokenize(src: &str) -> impl Iterator<Item = Token> + '_ {
         }
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    macro_rules! test {
+        ($name:ident: $input:tt -> #$length:expr $(, $comment:literal)?) => {
+            #[test]
+            fn $name() {
+                let tokens = tokenize($input).collect::<Vec<_>>();
+
+                assert_eq!(tokens.len(), $length, $($comment)?);
+            }
+        };
+        ($name:ident: $input:tt -> $output:pat $(, $comment:literal)?) => {
+            #[test]
+            fn $name() {
+                let tokens = tokenize($input).map(|token| token.kind).collect::<Vec<_>>();
+
+                assert!(matches!(tokens.as_slice(), $output), $($comment)?);
+            }
+        };
+        ($name:ident: $input:tt -> tokens $output:pat $(, $comment:literal)?) => {
+            #[test]
+            fn $name() {
+                let tokens = tokenize($input).collect::<Vec<_>>();
+
+                assert!(matches!(tokens.as_slice(), $output), $($comment)?);
+            }
+        };
+        ($name:ident: $input:tt -> expr $output:expr $(, $comment:literal)?) => {
+            #[test]
+            fn $name() {
+                let tokens = tokenize($input).map(|token| token.kind).collect::<Vec<_>>();
+
+                assert_eq!(tokens.as_slice(), $output, $($comment)?);
+            }
+        };
+    }
+
+    test!(test_eof: "" -> &[TokenKind::Eof], "should always return EOF at the end");
+
+    test!(test_comments: r#"// this comment should be ignored;
+/* this multiline comment should
+also be ignored
+even when there's /*
+another multiline comment
+inside of it
+*/"# -> #1, "comments should be ignored");
+
+    test!(test_keywords: "let if else while" -> &[
+        TokenKind::Keyword(Keyword::Let),
+        TokenKind::Keyword(Keyword::If),
+        TokenKind::Keyword(Keyword::Else),
+        TokenKind::Keyword(Keyword::While),
+        TokenKind::Eof,
+    ]);
+
+    #[test]
+    fn test_int_literals() {
+        let tokens = tokenize("01_231 0b0010101 0o1_251_274 0xFF_1B 0b 0o 0x")
+            .map(|token| token.kind)
+            .collect::<Vec<_>>();
+
+        let kinds = tokens
+            .iter()
+            .flat_map(|kind| match kind {
+                TokenKind::Literal { kind } => match kind {
+                    int @ LiteralKind::Int { .. } => Some(int),
+                    other => panic!("there should be only int literals, got {other:?}"),
+                },
+                TokenKind::Eof => None,
+                other => panic!("there should only be literals, got {other:?}"),
+            })
+            .collect::<Vec<_>>();
+
+        #[rustfmt::skip]
+        let result = &[
+            &LiteralKind::Int { base: Base::Decimal, empty: false, value: "01231".into() },
+            &LiteralKind::Int { base: Base::Binary, empty: false, value: "0010101".into() },
+            &LiteralKind::Int { base: Base::Octal, empty: false, value: "1251274".into() },
+            &LiteralKind::Int { base: Base::Hexadecimal, empty: false, value: "FF1B".into() },
+            &LiteralKind::Int { base: Base::Binary, empty: true, value: "".into() },
+            &LiteralKind::Int { base: Base::Octal, empty: true, value: "".into() },
+            &LiteralKind::Int { base: Base::Hexadecimal, empty: true, value: "".into() },
+        ];
+
+        assert_eq!(kinds, result);
+    }
+
+    #[test]
+    fn test_float_literals() {
+        let tokens = tokenize("1.012 0xFF.421 0o42617e-11 0231e+5 2133. 999E")
+            .map(|token| token.kind)
+            .collect::<Vec<_>>();
+
+        let kinds = tokens
+            .iter()
+            .flat_map(|kind| match kind {
+                TokenKind::Literal { kind } => match kind {
+                    float @ LiteralKind::Float { .. } => Some(float),
+                    other => panic!("there should be only float literals, got {other:?}"),
+                },
+                TokenKind::Eof => None,
+                other => panic!("there should only be literals, got {other:?}"),
+            })
+            .collect::<Vec<_>>();
+
+        #[rustfmt::skip]
+        let result = &[
+            &LiteralKind::Float { base: Base::Decimal, empty_exp: false, value: "1.012".into() },
+            &LiteralKind::Float { base: Base::Hexadecimal, empty_exp: false, value: "FF.421".into() },
+            &LiteralKind::Float { base: Base::Octal, empty_exp: false, value: "42617e-11".into() },
+            &LiteralKind::Float { base: Base::Decimal, empty_exp: false, value: "0231e+5".into() },
+            &LiteralKind::Float { base: Base::Decimal, empty_exp: false, value: "2133.".into() },
+            &LiteralKind::Float { base: Base::Decimal, empty_exp: true, value: "999E".into() },
+        ];
+
+        assert_eq!(kinds, result);
+    }
+
+    test!(test_identifiers: "foo bar baz123 _underscore" -> expr &[
+        TokenKind::Ident("foo".into()),
+        TokenKind::Ident("bar".into()),
+        TokenKind::Ident("baz123".into()),
+        TokenKind::Ident("_underscore".into()),
+
+        TokenKind::Eof,
+    ]);
+
+    test!(test_single_char_operators: "+ - * / % = < > ! & | ^" -> &[
+        TokenKind::Plus,
+        TokenKind::Minus,
+        TokenKind::Asterisk,
+        TokenKind::Slash,
+        TokenKind::Percent,
+        TokenKind::Assign,
+        TokenKind::Lt,
+        TokenKind::Gt,
+        TokenKind::Bang,
+        TokenKind::Amp,
+        TokenKind::Pipe,
+        TokenKind::Caret,
+
+        TokenKind::Eof,
+    ]);
+
+    test!(test_multi_char_operators: "== != <= >= && || += -= *= /= %= &= |=" -> &[
+        TokenKind::Eq,
+        TokenKind::Ne,
+        TokenKind::Le,
+        TokenKind::Ge,
+        TokenKind::And,
+        TokenKind::Or,
+        TokenKind::PlusAssign,
+        TokenKind::MinusAssign,
+        TokenKind::AsteriskAssign,
+        TokenKind::SlashAssign,
+        TokenKind::PercentAssign,
+        TokenKind::AmpAssign,
+        TokenKind::PipeAssign,
+
+        TokenKind::Eof,
+    ]);
+
+    test!(test_delimiters: "(){},;[]" -> &[
+        TokenKind::Lparen,
+        TokenKind::Rparen,
+        TokenKind::Lbrace,
+        TokenKind::Rbrace,
+        TokenKind::Comma,
+        TokenKind::Semicolon,
+        TokenKind::Lbracket,
+        TokenKind::Rbracket,
+
+        TokenKind::Eof,
+    ]);
+
+    test!(test_string_literal: r#""hello\nworld" "goodbye world..." "unterminated string!"# -> expr &[
+        TokenKind::Literal { kind: LiteralKind::String { terminated: true, value: "hello\nworld".into() } },
+        TokenKind::Literal { kind: LiteralKind::String { terminated: true, value: "goodbye world...".into() } },
+        TokenKind::Literal { kind: LiteralKind::String { terminated: false, value: "unterminated string!".into() } },
+
+        TokenKind::Eof,
+    ]);
+}
