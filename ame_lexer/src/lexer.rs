@@ -52,7 +52,7 @@ impl<'a> Lexer<'a> {
                     start_pos += c.len_utf8();
                     continue;
                 }
-                Some(c) if c == '/' => match self.peek() {
+                Some('/') => match self.peek() {
                     '/' => {
                         self.eat_while(|c| c != '\n');
                         start_pos = self.pos; // self.pos was advanced when skipping comment

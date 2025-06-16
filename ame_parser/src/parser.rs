@@ -146,7 +146,7 @@ impl<'a> Parser<'a> {
         let mut branches = vec![];
         branches.push((cond, body));
 
-        while let Ok(_) = self.expect(&TokenKind::Keyword(Keyword::Else)) {
+        while self.expect(&TokenKind::Keyword(Keyword::Else)).is_ok() {
             if self.at(&TokenKind::Keyword(Keyword::If)) {
                 self.next(); // `if` keyword
 

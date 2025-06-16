@@ -131,8 +131,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let target_triple = options
             .target
             .as_ref()
-            .and_then(|target| Some(TargetTriple::create(target)))
-            .unwrap_or_else(|| TargetMachine::get_default_triple());
+            .map(|target| TargetTriple::create(target))
+            .unwrap_or_else(TargetMachine::get_default_triple);
 
         let cpu = options
             .target
@@ -140,12 +140,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         let features = options
             .features
-            .and_then(|features| {
-                Some(if features == "native" {
+            .map(|features| {
+                if features == "native" {
                     TargetMachine::get_host_cpu_features().to_string()
                 } else {
                     features
-                })
+                }
             })
             .unwrap_or_else(|| "+cmov,+cx8,+fxsr,+mmx,+sse,+sse2".into());
 
@@ -206,7 +206,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 }) => {
                     let var = self
                         .builder
-                        .build_alloca(ty.as_llvm_type(self.context), &name)
+                        .build_alloca(ty.as_llvm_type(self.context), name)
                         .unwrap();
 
                     if let Some(init_expr) = init_expr {
@@ -233,7 +233,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         .unwrap();
 
                     self.builder.position_at_end(do_block);
-                    self.generate_stmts(&body, func);
+                    self.generate_stmts(body, func);
 
                     let cond_generated = self.generate_expr(cond);
                     let cmp = cond_generated.into_int_value();
@@ -254,7 +254,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     fn generate_if(
         &mut self,
         func: FunctionValue<'ctx>,
-        branches: &'a Vec<(Expr, Vec<Stmt>)>,
+        branches: &'a [(Expr, Vec<Stmt>)],
         else_body: &'a Option<Vec<Stmt>>,
     ) {
         let Some(((cond, body), rest)) = branches.split_last() else {
@@ -273,7 +273,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 .unwrap();
 
             self.builder.position_at_end(then_block);
-            self.generate_stmts(&body, func);
+            self.generate_stmts(body, func);
             self.builder
                 .build_unconditional_branch(ifcont_block)
                 .unwrap();
@@ -297,14 +297,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             .unwrap();
 
         self.builder.position_at_end(then_block);
-        self.generate_stmts(&body, func);
+        self.generate_stmts(body, func);
         self.builder
             .build_unconditional_branch(ifcont_block)
             .unwrap();
 
         if let Some(else_body) = else_body {
             self.builder.position_at_end(else_block.unwrap());
-            self.generate_stmts(&else_body, func);
+            self.generate_stmts(else_body, func);
 
             self.builder
                 .build_unconditional_branch(ifcont_block)
@@ -316,7 +316,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     fn generate_expr(&mut self, expr: &Expr) -> BasicValueEnum<'ctx> {
         let ty = expr.ty.resolve(&self.tcx);
-        let llvm_ty = ty.as_llvm_type(&self.context);
+        let llvm_ty = ty.as_llvm_type(self.context);
 
         match &expr.kind {
             ExprKind::Literal(kind) => match kind {
@@ -352,8 +352,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     self.locals.get(name).unwrap().into_pointer_value(),
                     "load",
                 )
-                .unwrap()
-                .into(),
+                .unwrap(),
             ExprKind::Binary(op, lhs, rhs) => {
                 let l = self.generate_expr(lhs);
                 let r = self.generate_expr(rhs);
@@ -440,7 +439,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             }
             ExprKind::Assign { op, lhs, rhs } => {
                 let ptr = match &lhs.kind {
-                    ExprKind::Variable(name) => self.locals.get(&name).unwrap().clone(),
+                    ExprKind::Variable(name) => *self.locals.get(&name).unwrap(),
                     _ => unreachable!("assignment lhs can only be variable"),
                 };
 

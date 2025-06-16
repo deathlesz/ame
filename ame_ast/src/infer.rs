@@ -49,7 +49,7 @@ impl<'a> Inferrer<'a> {
                         decl.ty = ty.clone();
                     }
 
-                    unify(&decl.ty, &ty, &mut self.tcx)?;
+                    unify(&decl.ty, &ty, self.tcx)?;
                     self.env.insert(decl.name.clone(), ty.clone());
                 }
 
@@ -61,7 +61,7 @@ impl<'a> Inferrer<'a> {
             } => {
                 for (cond, body) in branches {
                     self.infer_expr_type(cond)?;
-                    unify(&cond.ty, &Type::Bool, &mut self.tcx)?;
+                    unify(&cond.ty, &Type::Bool, self.tcx)?;
 
                     for stmt in body {
                         self.infer_stmt(stmt)?;
@@ -78,7 +78,7 @@ impl<'a> Inferrer<'a> {
             }
             StmtKind::While { cond, body } => {
                 self.infer_expr_type(cond)?;
-                unify(&cond.ty, &Type::Bool, &mut self.tcx)?;
+                unify(&cond.ty, &Type::Bool, self.tcx)?;
                 for stmt in body {
                     self.infer_stmt(stmt)?;
                 }
@@ -112,7 +112,7 @@ impl<'a> Inferrer<'a> {
                     | BinOp::BitAnd
                     | BinOp::BitXor
                     | BinOp::BitOr => {
-                        unify(&ltype, &rtype, &mut self.tcx)?;
+                        unify(&ltype, &rtype, self.tcx)?;
 
                         ltype
                     }
@@ -126,13 +126,13 @@ impl<'a> Inferrer<'a> {
                         ltype
                     }
                     BinOp::Eq | BinOp::Ne | BinOp::Gt | BinOp::Ge | BinOp::Lt | BinOp::Le => {
-                        unify(&ltype, &rtype, &mut self.tcx)?;
+                        unify(&ltype, &rtype, self.tcx)?;
 
                         Type::Bool
                     }
                     BinOp::And | BinOp::Or => {
-                        unify(&ltype, &Type::Bool, &mut self.tcx)?;
-                        unify(&rtype, &Type::Bool, &mut self.tcx)?;
+                        unify(&ltype, &Type::Bool, self.tcx)?;
+                        unify(&rtype, &Type::Bool, self.tcx)?;
 
                         Type::Bool
                     }
@@ -151,7 +151,7 @@ impl<'a> Inferrer<'a> {
                     | AssignOp::BitAnd
                     | AssignOp::BitXor
                     | AssignOp::BitOr => {
-                        unify(&ltype, &rtype, &mut self.tcx)?;
+                        unify(&ltype, &rtype, self.tcx)?;
 
                         ltype
                     }
@@ -165,7 +165,7 @@ impl<'a> Inferrer<'a> {
                         ltype
                     }
                     AssignOp::Assign => {
-                        unify(&ltype, &rtype, &mut self.tcx)?;
+                        unify(&ltype, &rtype, self.tcx)?;
 
                         ltype
                     }
@@ -173,7 +173,7 @@ impl<'a> Inferrer<'a> {
             }
         };
 
-        expr.ty = ty.resolve(&self.tcx);
+        expr.ty = ty.resolve(self.tcx);
         Ok(ty)
     }
 
@@ -196,8 +196,8 @@ impl<'a> Inferrer<'a> {
                         .env
                         .get(&var_decl.name)
                         .cloned()
-                        .unwrap_or_else(|| Type::Unknown)
-                        .resolve(&self.tcx);
+                        .unwrap_or(Type::Unknown)
+                        .resolve(self.tcx);
                 }
             }
             StmtKind::ExprStmt(expr) => self.resolve_expr(expr),
@@ -227,7 +227,7 @@ impl<'a> Inferrer<'a> {
     }
 
     fn resolve_expr(&self, expr: &mut Expr) {
-        expr.ty = expr.ty.resolve(&self.tcx);
+        expr.ty = expr.ty.resolve(self.tcx);
 
         match &mut expr.kind {
             ExprKind::Binary(_, lhs, rhs) => {

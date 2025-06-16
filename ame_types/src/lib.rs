@@ -24,7 +24,7 @@ impl Type {
         match self {
             Type::Var(id) => {
                 if let Some(ty) = ctx.get(id) {
-                    ty.resolve(&ctx)
+                    ty.resolve(ctx)
                 } else {
                     self.clone()
                 }
@@ -78,7 +78,7 @@ pub fn unify(t1: &Type, t2: &Type, ctx: &mut TypeCtx) -> Result<()> {
 
         (Type::Var(id), ty) | (ty, Type::Var(id)) => {
             // prevents infinitely-recursive types
-            if occurs_check(&id, &ty, ctx) {
+            if occurs_check(id, ty, ctx) {
                 Err(TypeError::Recursive(id.clone(), ty.clone()))
             } else {
                 println!("hello???? {id:?} {ty:?}");
@@ -136,6 +136,12 @@ impl TypeCtx {
             .entry(id)
             .and_modify(|old_ty| *old_ty = ty.clone())
             .or_insert(ty);
+    }
+}
+
+impl Default for TypeCtx {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
