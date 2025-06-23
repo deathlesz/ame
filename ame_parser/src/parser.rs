@@ -7,13 +7,20 @@ type Result<T> = std::result::Result<T, ParseError>;
 #[derive(Debug)]
 pub struct Parser<'a> {
     tokens: &'a [Token],
+    // NOTE: probably not the best decision, but i don't want all functions to return Vecs
+    // TODO: also, should probably use TinyVec or smth
+    backlog: Vec<Stmt>,
     pos: usize,
 }
 
 impl<'a> Parser<'a> {
     #[inline]
     pub const fn new(tokens: &'a [Token]) -> Self {
-        Self { tokens, pos: 0 }
+        Self {
+            tokens,
+            backlog: vec![],
+            pos: 0,
+        }
     }
 
     // `Token { kind: TokeKind::Eof, .. }` is always present at the end
@@ -87,12 +94,30 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_stmt(&mut self) -> Result<Option<Stmt>> {
-        match self.peek().kind {
-            TokenKind::Keyword(keyword) => match keyword {
-                Keyword::Let => Ok(Some(self.parse_let()?)),
+        if let Some(stmt) = self.backlog.pop() {
+            return Ok(Some(stmt));
+        }
+
+        let token = self.peek();
+        match &token.kind {
+            kw @ TokenKind::Keyword(keyword) => match keyword {
+                Keyword::Let => {
+                    let mut decls = self.parse_let()?;
+                    let result = decls
+                        .pop()
+                        .expect("at least 1 declaration must've been parsed");
+
+                    self.backlog.extend(decls);
+
+                    Ok(Some(result))
+                }
                 Keyword::If => Ok(Some(self.parse_if()?)),
                 Keyword::While => Ok(Some(self.parse_while()?)),
-                _ => todo!(),
+                Keyword::Else => Err(ParseError::Unexpected {
+                    got: kw.clone(),
+                    expected: "else to be preceeded by if statement".into(),
+                    span: token.span,
+                }),
             },
             TokenKind::Eof => Ok(None),
             TokenKind::Rbrace => Ok(None),
@@ -107,32 +132,43 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_let(&mut self) -> Result<Stmt> {
+    fn parse_let(&mut self) -> Result<Vec<Stmt>> {
         self.next(); // `let` keyword
 
-        let name = self.expect_ident()?;
-        let ty = if self.expect(&TokenKind::Colon).is_ok() {
-            Some(self.expect_ident()?)
-        } else {
-            None
-        };
+        let mut decls = vec![];
+        loop {
+            let name = self.expect_ident()?;
+            let ty = if self.expect(&TokenKind::Colon).is_ok() {
+                Some(self.expect_ident()?)
+            } else {
+                None
+            };
 
-        let with_init = self.expect(&TokenKind::Assign).is_ok();
-        let init_expr = if with_init {
-            Some(self.parse_expr(0)?)
-        } else {
-            None
-        };
+            let with_init = self.expect(&TokenKind::Assign).is_ok();
+            let init_expr = if with_init {
+                Some(self.parse_expr(0)?)
+            } else {
+                None
+            };
 
-        self.expect(&TokenKind::Semicolon)?;
+            decls.push(Stmt {
+                kind: StmtKind::VarDecl(VarDecl {
+                    name,
+                    ty: ty.map(|ty| ty.into()).unwrap_or(Type::Unknown),
+                    init_expr,
+                }),
+            });
 
-        Ok(Stmt {
-            kind: StmtKind::VarDecl(VarDecl {
-                name,
-                ty: ty.map(|ty| ty.into()).unwrap_or(Type::Unknown),
-                init_expr,
-            }),
-        })
+            if self.at(&TokenKind::Semicolon) {
+                self.next();
+                break;
+            }
+
+            self.expect(&TokenKind::Comma)?;
+        }
+
+        decls.reverse();
+        Ok(decls)
     }
 
     fn parse_if(&mut self) -> Result<Stmt> {
