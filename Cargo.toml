@@ -2,9 +2,13 @@
 resolver = "3"
 members = [
     "ame_cli",
+
+    "ame_common",
+
     "ame_lexer",
     "ame_parser",
     "ame_types",
+
     "ame_codegen_llvm",
 ]
 

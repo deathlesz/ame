@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::path::PathBuf;
 
 pub use inkwell::context::Context;
 use inkwell::{
@@ -10,6 +10,7 @@ use inkwell::{
 };
 
 use ame_ast::{AssignOp, BinOp, Expr, ExprKind, Stmt, StmtKind, VarDecl};
+use ame_common::ScopeStack;
 use ame_lexer::LiteralKind;
 use ame_types::{Type, TypeCtx};
 
@@ -23,7 +24,7 @@ pub struct CodeGen<'a, 'ctx> {
     ast: &'a [Stmt],
     tcx: TypeCtx,
 
-    locals: HashMap<&'a String, BasicValueEnum<'ctx>>,
+    locals: ScopeStack<&'a String, BasicValueEnum<'ctx>>,
 
     context: &'ctx Context,
     module: Module<'ctx>,
@@ -44,7 +45,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             ast,
             tcx,
 
-            locals: HashMap::new(),
+            locals: ScopeStack::new(),
 
             context,
             module,
@@ -215,7 +216,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         self.builder.build_store(var, expr).unwrap();
                     }
 
-                    self.locals.insert(name, var.as_basic_value_enum());
+                    self.locals.define(name, var.as_basic_value_enum());
                 }
                 StmtKind::If {
                     branches,
@@ -233,7 +234,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         .unwrap();
 
                     self.builder.position_at_end(do_block);
+
+                    self.locals.enter();
                     self.generate_stmts(body, func);
+                    self.locals.exit();
 
                     let cond_generated = self.generate_expr(cond);
                     let cmp = cond_generated.into_int_value();
@@ -273,7 +277,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 .unwrap();
 
             self.builder.position_at_end(then_block);
+
+            self.locals.enter();
             self.generate_stmts(body, func);
+            self.locals.exit();
+
             self.builder
                 .build_unconditional_branch(ifcont_block)
                 .unwrap();
@@ -297,14 +305,21 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             .unwrap();
 
         self.builder.position_at_end(then_block);
+
+        self.locals.enter();
         self.generate_stmts(body, func);
+        self.locals.exit();
+
         self.builder
             .build_unconditional_branch(ifcont_block)
             .unwrap();
 
         if let Some(else_body) = else_body {
             self.builder.position_at_end(else_block.unwrap());
+
+            self.locals.enter();
             self.generate_stmts(else_body, func);
+            self.locals.exit();
 
             self.builder
                 .build_unconditional_branch(ifcont_block)

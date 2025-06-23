@@ -1,5 +1,4 @@
-use std::collections::HashMap;
-
+use ame_common::ScopeStack;
 use ame_lexer::LiteralKind;
 use ame_types::{unify, FloatKind, IntKind, Type, TypeCtx, TypeError};
 
@@ -9,14 +8,14 @@ type Result<T> = std::result::Result<T, TypeError>;
 
 pub struct Inferrer<'a> {
     tcx: &'a mut TypeCtx,
-    env: HashMap<String, Type>,
+    env: ScopeStack<String, Type>,
 }
 
 impl<'a> Inferrer<'a> {
     pub fn new(tcx: &'a mut TypeCtx) -> Self {
         Self {
             tcx,
-            env: HashMap::new(),
+            env: ScopeStack::new(),
         }
     }
 
@@ -54,7 +53,7 @@ impl<'a> Inferrer<'a> {
                     // int32 by default)
                     // ideally should work line in rust where integer type is inferred from use
                     unify(&decl.ty, &ty, self.tcx)?;
-                    self.env.insert(decl.name.clone(), ty.clone());
+                    self.env.define(decl.name.clone(), ty.clone());
                 }
 
                 Ok(())
@@ -67,15 +66,19 @@ impl<'a> Inferrer<'a> {
                     self.infer_expr_type(cond)?;
                     unify(&cond.ty, &Type::Bool, self.tcx)?;
 
+                    self.env.enter();
                     for stmt in body {
                         self.infer_stmt(stmt)?;
                     }
+                    self.env.exit();
                 }
 
                 if let Some(else_stmts) = else_body {
+                    self.env.enter();
                     for stmt in else_stmts {
                         self.infer_stmt(stmt)?;
                     }
+                    self.env.exit();
                 }
 
                 Ok(())
@@ -83,9 +86,13 @@ impl<'a> Inferrer<'a> {
             StmtKind::While { cond, body } => {
                 self.infer_expr_type(cond)?;
                 unify(&cond.ty, &Type::Bool, self.tcx)?;
+
+                self.env.enter();
                 for stmt in body {
                     self.infer_stmt(stmt)?;
                 }
+                self.env.exit();
+
                 Ok(())
             }
             StmtKind::ExprStmt(expr) => {
@@ -98,11 +105,16 @@ impl<'a> Inferrer<'a> {
     fn infer_expr_type(&mut self, expr: &mut Expr) -> Result<Type> {
         let ty = match &mut expr.kind {
             ExprKind::Literal(lit) => Self::infer_literal_type(lit),
-            ExprKind::Variable(name) => self
-                .env
-                .entry(name.clone())
-                .or_insert_with(|| Type::Var(self.tcx.next_id()))
-                .clone(),
+            ExprKind::Variable(name) => {
+                if let Some(ty) = self.env.get(&*name) {
+                    ty.clone()
+                } else {
+                    let ty = Type::Var(self.tcx.next_id());
+                    self.env.define(name.clone(), ty.clone());
+
+                    ty
+                }
+            }
             ExprKind::Binary(op, lhs, rhs) => {
                 let ltype = self.infer_expr_type(lhs)?;
                 let rtype = self.infer_expr_type(rhs)?;

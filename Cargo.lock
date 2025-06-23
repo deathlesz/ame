@@ -21,6 +21,7 @@ checksum = "512761e0bb2578dd7380c6baaa0f4ce03e84f95e960231d1dec8bf4d7d6e2627"
 name = "ame_ast"
 version = "0.1.0"
 dependencies = [
+ "ame_common",
  "ame_lexer",
  "ame_types",
 ]
@@ -43,11 +44,16 @@ name = "ame_codegen_llvm"
 version = "0.1.0"
 dependencies = [
  "ame_ast",
+ "ame_common",
  "ame_lexer",
  "ame_types",
  "inkwell",
  "thiserror 2.0.12",
 ]
+
+[[package]]
+name = "ame_common"
+version = "0.1.0"
 
 [[package]]
 name = "ame_lexer"
