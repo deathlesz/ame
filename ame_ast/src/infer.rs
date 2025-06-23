@@ -49,6 +49,10 @@ impl<'a> Inferrer<'a> {
                         decl.ty = ty.clone();
                     }
 
+                    // FIXME: add handling for `let a: (u)int64 = 25`
+                    // currently it errors out because can't unify (u)int64 and int32 (literals are
+                    // int32 by default)
+                    // ideally should work line in rust where integer type is inferred from use
                     unify(&decl.ty, &ty, self.tcx)?;
                     self.env.insert(decl.name.clone(), ty.clone());
                 }
@@ -191,14 +195,17 @@ impl<'a> Inferrer<'a> {
             StmtKind::VarDecl(var_decl) => {
                 if let Some(expr) = &mut var_decl.init_expr {
                     self.resolve_expr(expr);
-                } else {
+                }
+
+                if var_decl.ty == Type::Unknown {
                     var_decl.ty = self
                         .env
                         .get(&var_decl.name)
                         .cloned()
-                        .unwrap_or(Type::Unknown)
-                        .resolve(self.tcx);
+                        .expect("by now all types must be known");
                 }
+
+                var_decl.ty.resolve(self.tcx);
             }
             StmtKind::ExprStmt(expr) => self.resolve_expr(expr),
             StmtKind::If {
