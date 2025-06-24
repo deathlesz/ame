@@ -23,6 +23,13 @@ pub enum StmtKind {
         cond: Expr,
         body: Vec<Stmt>,
     },
+    FnDecl {
+        name: String,
+        args: Vec<Stmt>,
+        body: Vec<Stmt>,
+        return_ty: Type,
+    },
+    Return(Option<Expr>),
     ExprStmt(Expr),
 }
 

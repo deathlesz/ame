@@ -118,6 +118,21 @@ impl<'a> Parser<'a> {
                     expected: "else to be preceeded by if statement".into(),
                     span: token.span,
                 }),
+                Keyword::Fn => Ok(Some(self.parse_fn()?)),
+                Keyword::Return => {
+                    self.next(); // `return` keyword
+                    let expr = if !self.at(&TokenKind::Semicolon) {
+                        Some(self.parse_expr(0)?)
+                    } else {
+                        None
+                    };
+
+                    self.expect(&TokenKind::Semicolon)?;
+
+                    Ok(Some(Stmt {
+                        kind: StmtKind::Return(expr),
+                    }))
+                }
             },
             TokenKind::Eof => Ok(None),
             TokenKind::Rbrace => Ok(None),
@@ -210,6 +225,65 @@ impl<'a> Parser<'a> {
             kind: StmtKind::If {
                 branches,
                 else_body: None,
+            },
+        })
+    }
+
+    fn parse_fn(&mut self) -> Result<Stmt> {
+        self.next(); // `fn` keyword
+
+        let name = self.expect_ident()?;
+
+        let mut args = vec![];
+        self.expect(&TokenKind::Lparen)?;
+        if !self.at(&TokenKind::Rparen) {
+            loop {
+                let name = self.expect_ident()?;
+                self.expect(&TokenKind::Colon)?;
+                let ty = self.expect_ident()?.into();
+
+                let with_init = self.expect(&TokenKind::Assign).is_ok();
+                let init_expr = if with_init {
+                    Some(self.parse_expr(0)?)
+                } else {
+                    None
+                };
+
+                // NOTE: maybe this is genius, maybe it's fucking awful
+                // we'll see
+                args.push(Stmt {
+                    kind: StmtKind::VarDecl(VarDecl {
+                        name,
+                        ty,
+                        init_expr,
+                    }),
+                });
+
+                if self.at(&TokenKind::Rparen) {
+                    break;
+                }
+
+                self.expect(&TokenKind::Comma)?;
+            }
+        }
+        self.next(); // `)`
+
+        let return_ty = if let Ok(ty) = self.expect_ident() {
+            ty.into()
+        } else {
+            Type::None
+        };
+
+        self.expect(&TokenKind::Lbrace)?;
+        let body = self.parse()?;
+        self.expect(&TokenKind::Rbrace)?;
+
+        Ok(Stmt {
+            kind: StmtKind::FnDecl {
+                name,
+                body,
+                args,
+                return_ty,
             },
         })
     }

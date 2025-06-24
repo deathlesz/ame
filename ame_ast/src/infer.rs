@@ -2,7 +2,7 @@ use ame_common::ScopeStack;
 use ame_lexer::LiteralKind;
 use ame_types::{unify, FloatKind, IntKind, Type, TypeCtx, TypeError};
 
-use crate::{AssignOp, BinOp, Expr, ExprKind, Stmt, StmtKind};
+use crate::{AssignOp, BinOp, Expr, ExprKind, Stmt, StmtKind, VarDecl};
 
 type Result<T> = std::result::Result<T, TypeError>;
 
@@ -95,8 +95,46 @@ impl<'a> Inferrer<'a> {
 
                 Ok(())
             }
+            StmtKind::FnDecl {
+                name,
+                body,
+                args,
+                return_ty,
+            } => {
+                let mut arg_tys = vec![];
+
+                self.env.enter();
+                for arg in args {
+                    self.infer_stmt(arg)?;
+
+                    match &arg.kind {
+                        StmtKind::VarDecl(VarDecl { ty, .. }) => arg_tys.push(ty.clone()),
+                        _ => unreachable!("function arguments are always variable declarations"),
+                    }
+                }
+
+                self.env.enter();
+                for stmt in body {
+                    self.infer_stmt(stmt)?;
+                }
+                self.env.exit();
+                self.env.exit();
+
+                self.env
+                    .define(name.clone(), Type::Fn(arg_tys, Box::new(return_ty.clone())));
+
+                Ok(())
+            }
+            StmtKind::Return(expr) => {
+                if let Some(expr) = expr {
+                    self.infer_expr_type(expr)?;
+                }
+
+                Ok(())
+            }
             StmtKind::ExprStmt(expr) => {
                 self.infer_expr_type(expr)?;
+
                 Ok(())
             }
         }
@@ -240,6 +278,30 @@ impl<'a> Inferrer<'a> {
                 self.resolve_expr(cond);
                 for stmt in body {
                     self.resolve_stmt(stmt);
+                }
+            }
+            StmtKind::FnDecl {
+                name,
+                args,
+                body,
+                return_ty: _,
+            } => {
+                for arg in args {
+                    self.resolve_stmt(arg);
+                }
+
+                for stmt in body {
+                    self.resolve_stmt(stmt);
+                }
+
+                self.env
+                    .get(name)
+                    .expect("fn should be defined probably")
+                    .resolve(self.tcx);
+            }
+            StmtKind::Return(expr) => {
+                if let Some(expr) = expr {
+                    self.resolve_expr(expr);
                 }
             }
         }

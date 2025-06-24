@@ -11,6 +11,8 @@ pub enum Type {
     Float(FloatKind),
     Bool,
     String,
+    Fn(Vec<Type>, Box<Type>),
+    None,
     Other(String), // placeholder for more types later
 }
 
@@ -81,8 +83,8 @@ pub fn unify(t1: &Type, t2: &Type, ctx: &mut TypeCtx) -> Result<()> {
             if occurs_check(id, ty, ctx) {
                 Err(TypeError::Recursive(id.clone(), ty.clone()))
             } else {
-                println!("hello???? {id:?} {ty:?}");
                 ctx.set(id.clone(), ty.clone());
+
                 Ok(())
             }
         }

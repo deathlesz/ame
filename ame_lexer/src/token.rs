@@ -96,6 +96,8 @@ pub enum Keyword {
     If,
     Else,
     While,
+    Fn,
+    Return,
 }
 
 impl std::str::FromStr for Keyword {
@@ -108,6 +110,8 @@ impl std::str::FromStr for Keyword {
             "if" => Ok(Keyword::If),
             "else" => Ok(Keyword::Else),
             "while" => Ok(Keyword::While),
+            "fn" => Ok(Keyword::Fn),
+            "return" => Ok(Keyword::Return),
             _ => Err(()),
         }
     }

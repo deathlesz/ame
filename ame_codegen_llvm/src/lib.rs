@@ -251,6 +251,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 StmtKind::ExprStmt(expr) => {
                     self.generate_expr(expr);
                 }
+                _ => todo!("oh no"),
             }
         }
     }
@@ -454,7 +455,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             }
             ExprKind::Assign { op, lhs, rhs } => {
                 let ptr = match &lhs.kind {
-                    ExprKind::Variable(name) => *self.locals.get(&name).unwrap(),
+                    ExprKind::Variable(name) => *self.locals.get(name).unwrap(),
                     _ => unreachable!("assignment lhs can only be variable"),
                 };
 
