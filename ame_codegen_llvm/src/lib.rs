@@ -5,6 +5,7 @@ use inkwell::{
     builder::Builder,
     module::Module,
     targets::{Target, TargetMachine, TargetTriple},
+    types::BasicType,
     values::{BasicValue, BasicValueEnum, FunctionValue},
     IntPredicate,
 };
@@ -363,14 +364,23 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     todo!("add support for string literals in codegen")
                 }
             },
-            ExprKind::Variable(name) => self
-                .builder
-                .build_load(
-                    llvm_ty,
-                    self.locals.get(name).unwrap().into_pointer_value(),
-                    "load",
-                )
-                .unwrap(),
+            ExprKind::Variable(name) => {
+                let var = self.locals.get(name).unwrap();
+
+                // a workaround for function arguments as they're not
+                // pointers
+                if var.is_pointer_value() {
+                    self.builder
+                        .build_load(
+                            llvm_ty,
+                            self.locals.get(name).unwrap().into_pointer_value(),
+                            "load",
+                        )
+                        .unwrap()
+                } else {
+                    *var
+                }
+            }
             ExprKind::Binary(op, lhs, rhs) => {
                 let l = self.generate_expr(lhs);
                 let r = self.generate_expr(rhs);
@@ -556,6 +566,20 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     }
                     _ => todo!(),
                 }
+            }
+            ExprKind::FnCall(name, args) => {
+                let func = self.module.get_function(name).expect("no func :(");
+
+                let args = args
+                    .iter()
+                    .map(|arg| self.generate_expr(arg).into())
+                    .collect::<Vec<_>>();
+
+                self.builder
+                    .build_call(func, &args, name)
+                    .unwrap()
+                    .try_as_basic_value()
+                    .unwrap_left()
             }
         }
     }

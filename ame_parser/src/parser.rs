@@ -361,7 +361,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_atom(&mut self) -> Result<Expr> {
-        let token = self.next();
+        let token = self.next().clone();
 
         match &token.kind {
             TokenKind::Literal { kind } => Ok(Expr {
@@ -374,10 +374,31 @@ impl<'a> Parser<'a> {
 
                 expr
             }
-            TokenKind::Ident(name) => Ok(Expr {
-                kind: ExprKind::Variable(name.clone()),
-                ty: Type::default(),
-            }),
+            TokenKind::Ident(name) => {
+                if self.at(&TokenKind::Lparen) {
+                    // actually a function call
+                    self.next();
+
+                    let mut args = vec![];
+                    while !self.at(&TokenKind::Rparen) {
+                        args.push(self.parse_expr(0)?);
+                        if self.at(&TokenKind::Comma) {
+                            self.next();
+                        }
+                    }
+                    self.next();
+
+                    return Ok(Expr {
+                        kind: ExprKind::FnCall(name.clone(), args),
+                        ty: Type::default(),
+                    });
+                }
+
+                Ok(Expr {
+                    kind: ExprKind::Variable(name.clone()),
+                    ty: Type::default(),
+                })
+            }
             got => Err(ParseError::Unexpected {
                 got: got.clone(),
                 expected: "an atom".into(),

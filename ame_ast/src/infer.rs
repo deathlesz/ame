@@ -244,6 +244,35 @@ impl<'a> Inferrer<'a> {
                     }
                 }
             }
+            ExprKind::FnCall(name, args) => {
+                if let Some(ty) = self.env.get(&*name).cloned() {
+                    match ty {
+                        Type::Fn(arg_tys, ret_ty) => {
+                            for (arg, arg_ty) in args.iter_mut().zip(arg_tys) {
+                                self.infer_expr_type(arg)?;
+
+                                unify(&arg.ty, &arg_ty, self.tcx)?;
+                            }
+
+                            ret_ty.resolve(self.tcx)
+                        }
+                        _ => unreachable!("function type is Fn, duh"),
+                    }
+                } else {
+                    let mut arg_tys = vec![];
+                    for arg in args.iter_mut() {
+                        self.infer_expr_type(arg)?;
+
+                        arg_tys.push(arg.ty.clone());
+                    }
+
+                    let ret_ty = Type::Var(self.tcx.next_id());
+                    let ty = Type::Fn(arg_tys, Box::new(ret_ty.clone()));
+                    self.env.define(name.clone(), ty.clone());
+
+                    ret_ty
+                }
+            }
         };
 
         expr.ty = ty.resolve(self.tcx);
@@ -337,6 +366,11 @@ impl<'a> Inferrer<'a> {
             ExprKind::Assign { lhs, rhs, .. } => {
                 self.resolve_expr(lhs);
                 self.resolve_expr(rhs);
+            }
+            ExprKind::FnCall(_, args) => {
+                for arg in args {
+                    self.resolve_expr(arg);
+                }
             }
             _ => {}
         }

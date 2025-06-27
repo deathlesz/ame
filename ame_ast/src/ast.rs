@@ -43,6 +43,7 @@ pub enum ExprKind {
         lhs: Box<Expr>,
         rhs: Box<Expr>,
     },
+    FnCall(String, Vec<Expr>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
