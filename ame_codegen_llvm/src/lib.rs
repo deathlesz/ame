@@ -29,6 +29,8 @@ pub struct CodeGen<'a, 'ctx> {
     context: &'ctx Context,
     module: Module<'ctx>,
     builder: Builder<'ctx>,
+
+    current_func: Option<FunctionValue<'ctx>>,
 }
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
@@ -50,23 +52,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             context,
             module,
             builder,
+
+            current_func: None,
         }
     }
 
     pub fn generate(&mut self, options: CodeGenOptions) {
-        let i32_type = self.context.i32_type();
-
-        let main_fn_type = i32_type.fn_type(&[], false);
-        let main_fn = self.module.add_function("main", main_fn_type, None);
-
-        let main_block = self.context.append_basic_block(main_fn, "main");
-        self.builder.position_at_end(main_block);
-
-        self.generate_stmts(self.ast, main_fn);
-
-        self.builder
-            .build_return(Some(&i32_type.const_zero()))
-            .unwrap();
+        self.generate_stmts(self.ast);
 
         Target::initialize_all(&inkwell::targets::InitializationConfig::default());
 
@@ -138,7 +130,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    fn generate_stmts(&mut self, stmts: &'a [Stmt], func: FunctionValue<'ctx>) {
+    fn generate_stmts(&mut self, stmts: &'a [Stmt]) {
         for stmt in stmts {
             match &stmt.kind {
                 StmtKind::VarDecl(VarDecl {
@@ -146,6 +138,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     ty,
                     init_expr,
                 }) => {
+                    if self.current_func.is_none() {
+                        panic!("no current function")
+                    }
+
                     let var = self
                         .builder
                         .build_alloca(ty.as_llvm_type(self.context), name)
@@ -162,32 +158,97 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 StmtKind::If {
                     branches,
                     else_body,
-                } => self.generate_if(func, branches, else_body),
+                } => {
+                    if let Some(func) = self.current_func {
+                        self.generate_if(func, branches, else_body)
+                    } else {
+                        panic!("no current function")
+                    }
+                }
                 StmtKind::While { cond, body } => {
-                    let cond_generated = self.generate_expr(cond);
-                    let cmp = cond_generated.into_int_value();
+                    if let Some(func) = self.current_func {
+                        let cond_generated = self.generate_expr(cond);
+                        let cmp = cond_generated.into_int_value();
 
-                    let do_block = self.context.append_basic_block(func, "do");
-                    let whilecont_block = self.context.append_basic_block(func, "whilecont");
+                        let do_block = self.context.append_basic_block(func, "do");
+                        let whilecont_block = self.context.append_basic_block(func, "whilecont");
 
-                    self.builder
-                        .build_conditional_branch(cmp, do_block, whilecont_block)
-                        .unwrap();
+                        self.builder
+                            .build_conditional_branch(cmp, do_block, whilecont_block)
+                            .unwrap();
 
-                    self.builder.position_at_end(do_block);
+                        self.builder.position_at_end(do_block);
+
+                        self.locals.enter();
+                        self.generate_stmts(body);
+                        self.locals.exit();
+
+                        let cond_generated = self.generate_expr(cond);
+                        let cmp = cond_generated.into_int_value();
+
+                        self.builder
+                            .build_conditional_branch(cmp, do_block, whilecont_block)
+                            .unwrap();
+
+                        self.builder.position_at_end(whilecont_block);
+                    } else {
+                        panic!("no current function")
+                    }
+                }
+                StmtKind::FnDecl {
+                    name,
+                    args,
+                    body,
+                    return_ty,
+                } => {
+                    // NOTE: this monstrosity is required because .unzip() requires Default
+                    // which is not implemented for BasicMetadataTypeEnum
+                    let (arg_names, arg_types) = args.iter().fold(
+                        (
+                            Vec::with_capacity(args.len()),
+                            Vec::with_capacity(args.len()),
+                        ),
+                        |(mut names, mut types), stmt| match &stmt.kind {
+                            StmtKind::VarDecl(VarDecl { name, ty, .. }) => {
+                                names.push(name);
+                                types.push(ty.as_llvm_type(self.context).into());
+
+                                (names, types)
+                            }
+                            _ => {
+                                unreachable!("function arguments are always variable declarations")
+                            }
+                        },
+                    );
+
+                    let fn_type = return_ty
+                        .as_llvm_type(self.context)
+                        .fn_type(&arg_types, false);
+
+                    let func = self.module.add_function(name, fn_type, None);
+                    self.current_func = Some(func);
+
+                    let bb = self.context.append_basic_block(func, name);
+                    self.builder.position_at_end(bb);
 
                     self.locals.enter();
-                    self.generate_stmts(body, func);
-                    self.locals.exit();
+                    for (name, arg) in arg_names.iter().zip(func.get_params()) {
+                        arg.set_name(name);
+                        self.locals.define(name, arg);
+                    }
 
-                    let cond_generated = self.generate_expr(cond);
-                    let cmp = cond_generated.into_int_value();
+                    self.locals.enter();
+                    self.generate_stmts(body);
+
+                    self.locals.exit();
+                    self.locals.exit();
+                }
+                StmtKind::Return(expr) => {
+                    let value = expr.as_ref().map(|expr| self.generate_expr(expr));
 
                     self.builder
-                        .build_conditional_branch(cmp, do_block, whilecont_block)
+                        .build_return(value.as_ref().map(|v| v as &dyn BasicValue<'ctx>))
                         .unwrap();
-
-                    self.builder.position_at_end(whilecont_block);
                 }
                 StmtKind::ExprStmt(expr) => {
                     self.generate_expr(expr);
@@ -221,7 +282,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             self.builder.position_at_end(then_block);
 
             self.locals.enter();
-            self.generate_stmts(body, func);
+            self.generate_stmts(body);
             self.locals.exit();
 
             self.builder
@@ -249,7 +310,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         self.builder.position_at_end(then_block);
 
         self.locals.enter();
-        self.generate_stmts(body, func);
+        self.generate_stmts(body);
         self.locals.exit();
 
         self.builder
@@ -260,7 +321,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             self.builder.position_at_end(else_block.unwrap());
 
             self.locals.enter();
-            self.generate_stmts(else_body, func);
+            self.generate_stmts(else_body);
             self.locals.exit();
 
             self.builder

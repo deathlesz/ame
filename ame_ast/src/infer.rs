@@ -108,15 +108,34 @@ impl<'a> Inferrer<'a> {
                     self.infer_stmt(arg)?;
 
                     match &arg.kind {
-                        StmtKind::VarDecl(VarDecl { ty, .. }) => arg_tys.push(ty.clone()),
+                        StmtKind::VarDecl(VarDecl { name, ty, .. }) => {
+                            arg_tys.push(ty.clone());
+                            self.env.define(name.clone(), ty.clone());
+                        }
                         _ => unreachable!("function arguments are always variable declarations"),
                     }
                 }
 
                 self.env.enter();
+
+                let mut returns = vec![];
                 for stmt in body {
                     self.infer_stmt(stmt)?;
+                    if let StmtKind::Return(expr) = &stmt.kind {
+                        returns.push(expr)
+                    }
                 }
+
+                for expr in returns {
+                    let ty = if let Some(expr) = expr {
+                        expr.ty.resolve(self.tcx)
+                    } else {
+                        Type::None
+                    };
+
+                    unify(&ty, return_ty, self.tcx)?;
+                }
+
                 self.env.exit();
                 self.env.exit();
 
