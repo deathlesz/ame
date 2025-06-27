@@ -64,65 +64,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         self.generate_stmts(self.ast, main_fn);
 
-        // NOTE: only for testing purposes while there's no print or something
-        // prints out all variable name-value pairs at the end of the program
-        // FIXME: add support for floats/bools/etc.
-        {
-            let printf_fn_type = i32_type.fn_type(&[self.context.ptr_type(0.into()).into()], true);
-            let printf_fn = self.module.add_function(
-                "printf",
-                printf_fn_type,
-                Some(inkwell::module::Linkage::External),
-            );
-
-            let fmt_str = self.context.const_string(b"%s: %d\n", true);
-            let fmt_str_global = self.module.add_global(fmt_str.get_type(), None, "fmt");
-            fmt_str_global.set_initializer(&fmt_str);
-            fmt_str_global.set_constant(true);
-            fmt_str_global.set_linkage(inkwell::module::Linkage::Private);
-
-            let fmt_str_ptr = unsafe {
-                self.builder.build_in_bounds_gep(
-                    fmt_str.get_type(),
-                    fmt_str_global.as_pointer_value(),
-                    &[i32_type.const_zero(), i32_type.const_zero()],
-                    "fmt_str_ptr",
-                )
-            }
-            .unwrap();
-
-            for (name, val) in &self.locals {
-                let var_name = self.context.const_string(name.as_bytes(), true);
-                let var_name_global = self.module.add_global(var_name.get_type(), None, "name");
-                var_name_global.set_initializer(&var_name);
-                var_name_global.set_constant(true);
-                var_name_global.set_linkage(inkwell::module::Linkage::Private);
-
-                let var_name_ptr = unsafe {
-                    self.builder.build_in_bounds_gep(
-                        var_name.get_type(),
-                        var_name_global.as_pointer_value(),
-                        &[i32_type.const_zero(), i32_type.const_zero()],
-                        "var_name_ptr",
-                    )
-                }
-                .unwrap();
-
-                let var = self
-                    .builder
-                    .build_load(i32_type, val.into_pointer_value(), "load")
-                    .unwrap();
-
-                self.builder
-                    .build_call(
-                        printf_fn,
-                        &[fmt_str_ptr.into(), var_name_ptr.into(), var.into()],
-                        "printf",
-                    )
-                    .unwrap();
-            }
-        }
-
         self.builder
             .build_return(Some(&i32_type.const_zero()))
             .unwrap();
