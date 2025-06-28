@@ -36,25 +36,23 @@ impl<'a> Inferrer<'a> {
     fn infer_stmt(&mut self, stmt: &mut Stmt) -> Result<()> {
         match &mut stmt.kind {
             StmtKind::VarDecl(decl) => {
-                let inferred = if let Some(init) = &mut decl.init_expr {
+                let ty = if let Some(init) = &mut decl.init_expr {
                     self.infer_expr_type(init)?;
-                    Some(init.ty.clone())
+                    init.ty.clone()
                 } else {
-                    None
+                    Type::Var(self.tcx.next_id())
                 };
 
-                if let Some(ty) = inferred {
-                    if decl.ty == Type::Unknown {
-                        decl.ty = ty.clone();
-                    }
-
-                    // FIXME: add handling for `let a: (u)int64 = 25`
-                    // currently it errors out because can't unify (u)int64 and int32 (literals are
-                    // int32 by default)
-                    // ideally should work line in rust where integer type is inferred from use
-                    unify(&decl.ty, &ty, self.tcx)?;
-                    self.env.define(decl.name.clone(), ty.clone());
+                if decl.ty == Type::Unknown {
+                    decl.ty = ty.clone();
                 }
+
+                // FIXME: add handling for `let a: (u)int64 = 25`
+                // currently it errors out because can't unify (u)int64 and int32 (literals are
+                // int32 by default)
+                // ideally should work line in rust where integer type is inferred from use
+                unify(&decl.ty, &ty, self.tcx)?;
+                self.env.define(decl.name.clone(), ty.clone());
 
                 Ok(())
             }
@@ -303,7 +301,7 @@ impl<'a> Inferrer<'a> {
                         .expect("by now all types must be known");
                 }
 
-                var_decl.ty.resolve(self.tcx);
+                var_decl.ty = var_decl.ty.resolve(self.tcx);
             }
             StmtKind::ExprStmt(expr) => self.resolve_expr(expr),
             StmtKind::If {
