@@ -6,6 +6,7 @@ edition.workspace = true
 license.workspace = true
 keywords.workspace = true
 readme.workspace = true
+default-run = "ame_cli"
 
 [dependencies]
 miette = { version = "7", features = ["fancy"] }
