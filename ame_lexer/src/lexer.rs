@@ -42,7 +42,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn next(&mut self) -> Token {
+    fn next(&mut self) -> Result<Token, LexError> {
         let mut start_pos = self.pos;
 
         let first;
@@ -72,15 +72,18 @@ impl<'a> Lexer<'a> {
                     '=' => {
                         self.bump();
 
-                        return Token::new(TokenKind::SlashAssign, Span::new(start_pos, self.pos));
+                        return Ok(Token::new(
+                            TokenKind::SlashAssign,
+                            Span::new(start_pos, self.pos),
+                        ));
                     }
-                    _ => return Token::new(TokenKind::Slash, Span::new(start_pos, self.pos)),
+                    _ => return Ok(Token::new(TokenKind::Slash, Span::new(start_pos, self.pos))),
                 },
                 Some(c) => {
                     first = c;
                     break;
                 }
-                None => return Token::new(TokenKind::Eof, Span::new(self.pos, self.pos)),
+                None => return Ok(Token::new(TokenKind::Eof, Span::new(self.pos, self.pos))),
             }
         }
 
@@ -122,7 +125,7 @@ impl<'a> Lexer<'a> {
                 TokenKind::Literal { kind }
             }
             '"' => {
-                let (value, terminated) = self.string();
+                let (value, terminated) = self.string()?;
                 let kind = LiteralKind::String { terminated, value };
 
                 TokenKind::Literal { kind }
@@ -183,7 +186,7 @@ impl<'a> Lexer<'a> {
             c => TokenKind::Unknown(c),
         };
 
-        Token::new(kind, Span::new(start_pos, self.pos))
+        Ok(Token::new(kind, Span::new(start_pos, self.pos)))
     }
 
     fn number(&mut self, d: char) -> LiteralKind {
@@ -324,13 +327,13 @@ impl<'a> Lexer<'a> {
         self.eat_based_digits(10, string)
     }
 
-    fn string(&mut self) -> (String, bool) {
+    fn string(&mut self) -> Result<(String, bool), LexError> {
         let mut value = String::new();
 
         // TODO: do some better escaping probably?
         while let Some(c) = self.bump() {
             match c {
-                '"' => return (value, true),
+                '"' => return Ok((value, true)),
                 '\\' => match self.peek() {
                     '"' => {
                         self.bump();
@@ -356,17 +359,17 @@ impl<'a> Lexer<'a> {
                         self.bump();
                         value.push('\0');
                     }
-                    _ => panic!("unrecognized escape"),
+                    escape => return Err(LexError::InvalidEscape(escape)),
                 },
                 _ => value.push(c),
             }
         }
 
-        (value, false)
+        Ok((value, false))
     }
 }
 
-pub fn tokenize(src: &str) -> impl Iterator<Item = Token> + '_ {
+pub fn tokenize(src: &str) -> impl Iterator<Item = Result<Token, LexError>> + '_ {
     use std::rc::Rc;
 
     let mut lexer = Lexer::new(src);
@@ -377,7 +380,7 @@ pub fn tokenize(src: &str) -> impl Iterator<Item = Token> + '_ {
 
         if *eof_encountered {
             None
-        } else if token.kind != TokenKind::Eof {
+        } else if matches!(&token, Ok(token) if token.kind != TokenKind::Eof) {
             Some(token)
         } else {
             let eof_encountered = Rc::get_mut(&mut eof_encountered).unwrap();
@@ -388,6 +391,23 @@ pub fn tokenize(src: &str) -> impl Iterator<Item = Token> + '_ {
     })
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LexError {
+    UnknownToken(char),
+    InvalidEscape(char),
+}
+
+impl std::fmt::Display for LexError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnknownToken(token) => write!(f, "unknown token `{token}`"),
+            Self::InvalidEscape(escape) => write!(f, "invalid escape sequence: `\\{escape}`"),
+        }
+    }
+}
+
+impl std::error::Error for LexError {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -396,7 +416,7 @@ mod tests {
         ($name:ident: $input:tt -> #$length:expr $(, $comment:literal)?) => {
             #[test]
             fn $name() {
-                let tokens = tokenize($input).collect::<Vec<_>>();
+                let tokens = tokenize($input).collect::<Result<Vec<_>, _>>().unwrap();
 
                 assert_eq!(tokens.len(), $length, $($comment)?);
             }
@@ -404,7 +424,7 @@ mod tests {
         ($name:ident: $input:tt -> $output:pat $(, $comment:literal)?) => {
             #[test]
             fn $name() {
-                let tokens = tokenize($input).map(|token| token.kind).collect::<Vec<_>>();
+                let tokens = tokenize($input).map(|token| token.map(|token| token.kind)).collect::<Result<Vec<_>, _>>().unwrap();
 
                 assert!(matches!(tokens.as_slice(), $output), $($comment)?);
             }
@@ -412,7 +432,7 @@ mod tests {
         ($name:ident: $input:tt -> tokens $output:pat $(, $comment:literal)?) => {
             #[test]
             fn $name() {
-                let tokens = tokenize($input).collect::<Vec<_>>();
+                let tokens = tokenize($input).collect::<Result<Vec<_>, _>>().unwrap();
 
                 assert!(matches!(tokens.as_slice(), $output), $($comment)?);
             }
@@ -420,7 +440,7 @@ mod tests {
         ($name:ident: $input:tt -> expr $output:expr $(, $comment:literal)?) => {
             #[test]
             fn $name() {
-                let tokens = tokenize($input).map(|token| token.kind).collect::<Vec<_>>();
+                let tokens = tokenize($input).map(|token| token.map(|token| token.kind)).collect::<Result<Vec<_>, _>>().unwrap();
 
                 assert_eq!(tokens.as_slice(), $output, $($comment)?);
             }
@@ -437,19 +457,22 @@ another multiline comment
 inside of it
 */"# -> #1, "comments should be ignored");
 
-    test!(test_keywords: "let if else while" -> &[
+    test!(test_keywords: "let if else while fn return" -> &[
         TokenKind::Keyword(Keyword::Let),
         TokenKind::Keyword(Keyword::If),
         TokenKind::Keyword(Keyword::Else),
         TokenKind::Keyword(Keyword::While),
+        TokenKind::Keyword(Keyword::Fn),
+        TokenKind::Keyword(Keyword::Return),
         TokenKind::Eof,
     ]);
 
     #[test]
     fn test_int_literals() {
         let tokens = tokenize("01_231 0b0010101 0o1_251_274 0xFF_1B 0b 0o 0x")
-            .map(|token| token.kind)
-            .collect::<Vec<_>>();
+            .map(|token| token.map(|token| token.kind))
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
 
         let kinds = tokens
             .iter()
@@ -480,8 +503,9 @@ inside of it
     #[test]
     fn test_float_literals() {
         let tokens = tokenize("1.012 0xFF.421 0o42617e-11 0231e+5 2133. 999E")
-            .map(|token| token.kind)
-            .collect::<Vec<_>>();
+            .map(|token| token.map(|token| token.kind))
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
 
         let kinds = tokens
             .iter()
@@ -508,11 +532,13 @@ inside of it
         assert_eq!(kinds, result);
     }
 
-    test!(test_identifiers: "foo bar baz123 _underscore" -> expr &[
+    test!(test_identifiers: "foo bar baz123 _underscore _ _123" -> expr &[
         TokenKind::Ident("foo".into()),
         TokenKind::Ident("bar".into()),
         TokenKind::Ident("baz123".into()),
         TokenKind::Ident("_underscore".into()),
+        TokenKind::Ident("_".into()),
+        TokenKind::Ident("_123".into()),
 
         TokenKind::Eof,
     ]);
@@ -569,6 +595,12 @@ inside of it
         TokenKind::Literal { kind: LiteralKind::String { terminated: true, value: "hello\nworld".into() } },
         TokenKind::Literal { kind: LiteralKind::String { terminated: true, value: "goodbye world...".into() } },
         TokenKind::Literal { kind: LiteralKind::String { terminated: false, value: "unterminated string!".into() } },
+
+        TokenKind::Eof,
+    ]);
+
+    test!(test_escape_sequences: r#""\"\\\n\r\t\0""# -> expr &[
+        TokenKind::Literal { kind: LiteralKind::String { terminated: true, value: "\"\\\n\r\t\0".into() } },
 
         TokenKind::Eof,
     ]);

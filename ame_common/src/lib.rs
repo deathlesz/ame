@@ -1,5 +1,6 @@
 use std::{borrow::Borrow, collections::HashMap};
 
+#[derive(Debug)]
 pub struct ScopeStack<K, V> {
     scopes: Vec<HashMap<K, V>>,
 }

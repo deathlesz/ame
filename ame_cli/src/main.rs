@@ -24,7 +24,10 @@ fn main() -> Result<()> {
         .into_diagnostic()
         .wrap_err_with(|| format!("failed to read from `{}`", args.source.display()))?;
 
-    let tokens = tokenize(&source).collect::<Vec<_>>();
+    let tokens = tokenize(&source)
+        .collect::<Result<Vec<_>, _>>()
+        .into_diagnostic()
+        .wrap_err("failed to lex")?;
 
     let mut parser = Parser::new(&tokens);
     let mut ast = parser
