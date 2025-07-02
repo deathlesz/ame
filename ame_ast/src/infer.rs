@@ -116,21 +116,8 @@ impl<'a> Inferrer<'a> {
 
                 self.env.enter();
 
-                let mut returns = vec![];
-                for stmt in body {
-                    self.infer_stmt(stmt)?;
-                    if let StmtKind::Return(expr) = &stmt.kind {
-                        returns.push(expr)
-                    }
-                }
-
-                for expr in returns {
-                    let ty = if let Some(expr) = expr {
-                        expr.ty.resolve(self.tcx)
-                    } else {
-                        Type::None
-                    };
-
+                let returns = self.infer_and_collect_returns(body)?;
+                for ty in returns {
                     unify(&ty, return_ty, self.tcx)?;
                 }
 
@@ -155,6 +142,41 @@ impl<'a> Inferrer<'a> {
                 Ok(())
             }
         }
+    }
+
+    fn infer_and_collect_returns(&mut self, stmts: &mut [Stmt]) -> Result<Vec<Type>> {
+        let mut returns = vec![];
+
+        for stmt in stmts {
+            self.infer_stmt(stmt)?;
+
+            match &mut stmt.kind {
+                StmtKind::Return(expr) => returns.push(
+                    expr.as_ref()
+                        .map(|expr| expr.ty.clone())
+                        .unwrap_or(Type::Unknown)
+                        .resolve(self.tcx),
+                ),
+                StmtKind::If {
+                    branches,
+                    else_body,
+                } => {
+                    for (_, body) in branches {
+                        returns.extend(self.infer_and_collect_returns(body)?);
+                    }
+
+                    if let Some(body) = else_body {
+                        returns.extend(self.infer_and_collect_returns(body)?);
+                    }
+                }
+                StmtKind::While { body, .. } => {
+                    returns.extend(self.infer_and_collect_returns(body)?);
+                }
+                _ => {}
+            }
+        }
+
+        Ok(returns)
     }
 
     fn infer_expr_type(&mut self, expr: &mut Expr) -> Result<Type> {
