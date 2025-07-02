@@ -60,6 +60,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     pub fn generate(&mut self, options: CodeGenOptions) {
         self.generate_stmts(self.ast);
+        self.module.verify().expect("failed to verify");
 
         Target::initialize_all(&inkwell::targets::InitializationConfig::default());
 
@@ -131,7 +132,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    fn generate_stmts(&mut self, stmts: &'a [Stmt]) {
+    fn generate_stmts(&mut self, stmts: &'a [Stmt]) -> bool {
+        let mut returned = false;
         for stmt in stmts {
             match &stmt.kind {
                 StmtKind::VarDecl(VarDecl {
@@ -181,15 +183,17 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         self.builder.position_at_end(do_block);
 
                         self.locals.enter();
-                        self.generate_stmts(body);
+                        let returned = self.generate_stmts(body);
                         self.locals.exit();
 
-                        let cond_generated = self.generate_expr(cond);
-                        let cmp = cond_generated.into_int_value();
+                        if !returned {
+                            let cond_generated = self.generate_expr(cond);
+                            let cmp = cond_generated.into_int_value();
 
-                        self.builder
-                            .build_conditional_branch(cmp, do_block, whilecont_block)
-                            .unwrap();
+                            self.builder
+                                .build_conditional_branch(cmp, do_block, whilecont_block)
+                                .unwrap();
+                        }
 
                         self.builder.position_at_end(whilecont_block);
                     } else {
@@ -253,13 +257,16 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     self.builder
                         .build_return(value.as_ref().map(|v| v as &dyn BasicValue<'ctx>))
                         .unwrap();
+
+                    returned = true;
                 }
                 StmtKind::ExprStmt(expr) => {
                     self.generate_expr(expr);
                 }
-                _ => todo!("oh no"),
             }
         }
+
+        returned
     }
 
     fn generate_if(
@@ -286,12 +293,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             self.builder.position_at_end(then_block);
 
             self.locals.enter();
-            self.generate_stmts(body);
+            let returned = self.generate_stmts(body);
             self.locals.exit();
 
-            self.builder
-                .build_unconditional_branch(ifcont_block)
-                .unwrap();
+            if !returned {
+                self.builder
+                    .build_unconditional_branch(ifcont_block)
+                    .unwrap();
+            }
 
             self.builder.position_at_end(ifcont_block);
         }
@@ -314,23 +323,27 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         self.builder.position_at_end(then_block);
 
         self.locals.enter();
-        self.generate_stmts(body);
+        let returned = self.generate_stmts(body);
         self.locals.exit();
 
-        self.builder
-            .build_unconditional_branch(ifcont_block)
-            .unwrap();
+        if !returned {
+            self.builder
+                .build_unconditional_branch(ifcont_block)
+                .unwrap();
+        }
 
         if let Some(else_body) = else_body {
             self.builder.position_at_end(else_block.unwrap());
 
             self.locals.enter();
-            self.generate_stmts(else_body);
+            let returned = self.generate_stmts(else_body);
             self.locals.exit();
 
-            self.builder
-                .build_unconditional_branch(ifcont_block)
-                .unwrap();
+            if !returned {
+                self.builder
+                    .build_unconditional_branch(ifcont_block)
+                    .unwrap();
+            }
         }
 
         self.builder.position_at_end(ifcont_block);

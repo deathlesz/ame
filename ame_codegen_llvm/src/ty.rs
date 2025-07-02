@@ -24,7 +24,7 @@ impl<'ctx> AsLLVMType<'ctx> for Type {
             },
             Self::Bool => ctx.bool_type().into(),
 
-            _ => panic!("cannot lower to llvm type"),
+            other => panic!("cannot lower {other:?} to llvm type"),
         }
     }
 }
