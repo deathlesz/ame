@@ -1,6 +1,6 @@
 use ame_common::ScopeStack;
 use ame_lexer::LiteralKind;
-use ame_types::{unify, FloatKind, IntKind, Type, TypeCtx, TypeError};
+use ame_types::{unify, Type, TypeCtx, TypeError};
 
 use crate::{AssignOp, BinOp, Expr, ExprKind, Stmt, StmtKind, VarDecl};
 
@@ -40,17 +40,13 @@ impl<'a> Inferrer<'a> {
                     self.infer_expr_type(init)?;
                     init.ty.clone()
                 } else {
-                    Type::Var(self.tcx.next_id())
+                    Type::var(self.tcx)
                 };
 
                 if decl.ty == Type::Unknown {
                     decl.ty = ty.clone();
                 }
 
-                // FIXME: add handling for `let a: (u)int64 = 25`
-                // currently it errors out because can't unify (u)int64 and int32 (literals are
-                // int32 by default)
-                // ideally should work line in rust where integer type is inferred from use
                 unify(&decl.ty, &ty, self.tcx)?;
                 self.env.define(decl.name.clone(), ty.clone());
 
@@ -181,12 +177,12 @@ impl<'a> Inferrer<'a> {
 
     fn infer_expr_type(&mut self, expr: &mut Expr) -> Result<Type> {
         let ty = match &mut expr.kind {
-            ExprKind::Literal(lit) => Self::infer_literal_type(lit),
+            ExprKind::Literal(lit) => self.infer_literal_type(lit),
             ExprKind::Variable(name) => {
                 if let Some(ty) = self.env.get(&*name) {
                     ty.clone()
                 } else {
-                    let ty = Type::Var(self.tcx.next_id());
+                    let ty = Type::var(self.tcx);
                     self.env.define(name.clone(), ty.clone());
 
                     ty
@@ -286,7 +282,7 @@ impl<'a> Inferrer<'a> {
                         arg_tys.push(arg.ty.clone());
                     }
 
-                    let ret_ty = Type::Var(self.tcx.next_id());
+                    let ret_ty = Type::var(self.tcx);
                     let ty = Type::Fn(arg_tys, Box::new(ret_ty.clone()));
                     self.env.define(name.clone(), ty.clone());
 
@@ -299,11 +295,11 @@ impl<'a> Inferrer<'a> {
         Ok(ty)
     }
 
-    fn infer_literal_type(lit: &LiteralKind) -> Type {
+    fn infer_literal_type(&mut self, lit: &LiteralKind) -> Type {
         match lit {
-            LiteralKind::Int { .. } => Type::Int(IntKind::default()),
+            LiteralKind::Int { .. } => Type::var_int(self.tcx),
             // LiteralKind::Bool(_) => Type::Bool,
-            LiteralKind::Float { .. } => Type::Float(FloatKind::default()),
+            LiteralKind::Float { .. } => Type::var_float(self.tcx),
             LiteralKind::String { .. } => Type::String,
         }
     }

@@ -6,7 +6,7 @@ type Result<T> = std::result::Result<T, TypeError>;
 pub enum Type {
     #[default]
     Unknown,
-    Var(TypeId),
+    Var(TypeId, Constraint),
     Int(IntKind),
     Float(FloatKind),
     Bool,
@@ -19,12 +19,22 @@ pub enum Type {
 impl Type {
     #[inline]
     pub fn var(ctx: &mut TypeCtx) -> Self {
-        Self::Var(ctx.next_id())
+        Self::Var(ctx.next_id(), Constraint::None)
+    }
+
+    #[inline]
+    pub fn var_int(ctx: &mut TypeCtx) -> Self {
+        Self::Var(ctx.next_id(), Constraint::Integer)
+    }
+
+    #[inline]
+    pub fn var_float(ctx: &mut TypeCtx) -> Self {
+        Self::Var(ctx.next_id(), Constraint::Float)
     }
 
     pub fn resolve(&self, ctx: &TypeCtx) -> Self {
         match self {
-            Type::Var(id) => {
+            Type::Var(id, _) => {
                 if let Some(ty) = ctx.get(id) {
                     ty.resolve(ctx)
                 } else {
@@ -76,9 +86,15 @@ pub fn unify(t1: &Type, t2: &Type, ctx: &mut TypeCtx) -> Result<()> {
         (Type::Bool, Type::Bool) => Ok(()),
         (Type::String, Type::String) => Ok(()),
 
-        (Type::Var(id1), Type::Var(id2)) if id1 == id2 => Ok(()),
+        (Type::Var(id1, constraint1), Type::Var(id2, constraint2))
+            if id1 == id2 && constraint1 == constraint2 =>
+        {
+            Ok(())
+        }
 
-        (Type::Var(id), ty) | (ty, Type::Var(id)) => {
+        (Type::Var(id, constraint), ty) | (ty, Type::Var(id, constraint))
+            if constraint.matches(ty) =>
+        {
             // prevents infinitely-recursive types
             if occurs_check(id, ty, ctx) {
                 Err(TypeError::Recursive(id.clone(), ty.clone()))
@@ -96,13 +112,30 @@ pub fn unify(t1: &Type, t2: &Type, ctx: &mut TypeCtx) -> Result<()> {
 
 fn occurs_check(id: &TypeId, ty: &Type, ctx: &TypeCtx) -> bool {
     match ty.resolve(ctx) {
-        Type::Var(ref other_id) => id == other_id,
+        Type::Var(ref other_id, _) => id == other_id,
         _ => false,
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TypeId(usize);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Constraint {
+    None,
+    Integer,
+    Float,
+}
+
+impl Constraint {
+    fn matches(&self, ty: &Type) -> bool {
+        match self {
+            Self::None => true,
+            Self::Integer => matches!(ty, &Type::Int(_) | &Type::Var(_, Constraint::Integer)),
+            Self::Float => matches!(ty, &Type::Float(_) | &Type::Var(_, Constraint::Float)),
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct TypeCtx {

@@ -23,6 +23,8 @@ impl<'ctx> AsLLVMType<'ctx> for Type {
                 FloatKind::Float64 => ctx.f64_type().into(),
             },
             Self::Bool => ctx.bool_type().into(),
+            Self::Var(_, ame_types::Constraint::Integer) => ctx.i32_type().into(),
+            Self::Var(_, ame_types::Constraint::Float) => ctx.f64_type().into(),
 
             other => panic!("cannot lower {other:?} to llvm type"),
         }

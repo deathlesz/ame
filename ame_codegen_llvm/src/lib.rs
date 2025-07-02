@@ -359,9 +359,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     base,
                     empty: _,
                     value,
-                } => self
-                    .context
-                    .i32_type()
+                } => llvm_ty
+                    .into_int_type()
                     .const_int(
                         i32::from_str_radix(value.trim(), *base as u32).unwrap() as u64,
                         false,
@@ -371,9 +370,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     base: _,
                     empty_exp: _,
                     value,
-                } => self
-                    .context
-                    .f64_type()
+                } => llvm_ty
+                    .into_float_type()
                     .const_float(value.trim().parse().unwrap())
                     .into(),
                 LiteralKind::String { .. } => {
