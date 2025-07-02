@@ -9,7 +9,7 @@ fn factorial(n: int32) int32 {
 }
 
 fn factorial_loop(n: int32) int32 {
-    let result = 1, n = n;
+    let result = 1;
     while (n >= 2) {
         result *= n;
         n -= 1;

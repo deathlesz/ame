@@ -234,8 +234,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
                     self.locals.enter();
                     for (name, arg) in arg_names.iter().zip(func.get_params()) {
+                        let ptr = self.builder.build_alloca(arg.get_type(), name).unwrap();
+                        self.builder.build_store(ptr, arg).unwrap();
+
                         arg.set_name(name);
-                        self.locals.define(name, arg);
+                        self.locals.define(name, ptr.as_basic_value_enum());
                     }
 
                     self.locals.enter();
@@ -364,23 +367,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     todo!("add support for string literals in codegen")
                 }
             },
-            ExprKind::Variable(name) => {
-                let var = self.locals.get(name).unwrap();
-
-                // a workaround for function arguments as they're not
-                // pointers
-                if var.is_pointer_value() {
-                    self.builder
-                        .build_load(
-                            llvm_ty,
-                            self.locals.get(name).unwrap().into_pointer_value(),
-                            "load",
-                        )
-                        .unwrap()
-                } else {
-                    *var
-                }
-            }
+            ExprKind::Variable(name) => self
+                .builder
+                .build_load(
+                    llvm_ty,
+                    self.locals.get(name).unwrap().into_pointer_value(),
+                    "load",
+                )
+                .unwrap(),
             ExprKind::Binary(op, lhs, rhs) => {
                 let l = self.generate_expr(lhs);
                 let r = self.generate_expr(rhs);

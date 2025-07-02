@@ -20,4 +20,3 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 keywords = ["compiler", "language", "ame"]
 readme = "README.md"
-default-run = "ame_cli"
