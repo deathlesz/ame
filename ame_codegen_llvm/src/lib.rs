@@ -5,7 +5,7 @@ use inkwell::{
     builder::Builder,
     module::Module,
     targets::{Target, TargetMachine, TargetTriple},
-    types::BasicType,
+    types::{BasicType, BasicTypeEnum},
     values::{BasicValue, BasicValueEnum, FunctionValue},
     IntPredicate,
 };
@@ -133,6 +133,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     fn generate_stmts(&mut self, stmts: &'a [Stmt]) -> bool {
+        self.generate_fns(stmts);
+
         let mut returned = false;
         for stmt in stmts {
             match &stmt.kind {
@@ -147,7 +149,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
                     let var = self
                         .builder
-                        .build_alloca(ty.as_llvm_type(self.context), name)
+                        .build_alloca(
+                            std::convert::TryInto::<BasicTypeEnum>::try_into(
+                                ty.as_llvm_type(self.context),
+                            )
+                            .unwrap(),
+                            name,
+                        )
                         .unwrap();
 
                     if let Some(init_expr) = init_expr {
@@ -201,47 +209,30 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     }
                 }
                 StmtKind::FnDecl {
-                    name,
-                    args,
-                    body,
-                    return_ty,
+                    name, args, body, ..
                 } => {
-                    // NOTE: this monstrosity is required because .unzip() requires Default
-                    // which is not implemented for BasicMetadataTypeEnum
-                    let (arg_names, arg_types) = args.iter().fold(
-                        (
-                            Vec::with_capacity(args.len()),
-                            Vec::with_capacity(args.len()),
-                        ),
-                        |(mut names, mut types), stmt| match &stmt.kind {
-                            StmtKind::VarDecl(VarDecl { name, ty, .. }) => {
-                                names.push(name);
-                                types.push(ty.as_llvm_type(self.context).into());
+                    let arg_names = args.iter().map(|stmt| match &stmt.kind {
+                        StmtKind::VarDecl(VarDecl { name, .. }) => name,
+                        _ => {
+                            unreachable!("function arguments are always variable declarations")
+                        }
+                    });
 
-                                (names, types)
-                            }
-                            _ => {
-                                unreachable!("function arguments are always variable declarations")
-                            }
-                        },
-                    );
+                    // will never panic because it was pregenerated earlier
+                    let func = self.module.get_function(name).unwrap();
 
-                    let fn_type = return_ty
-                        .as_llvm_type(self.context)
-                        .fn_type(&arg_types, false);
-
-                    let func = self.module.add_function(name, fn_type, None);
+                    let prev_func = self.current_func;
+                    let prev_bb = self.builder.get_insert_block();
                     self.current_func = Some(func);
 
                     let bb = self.context.append_basic_block(func, name);
                     self.builder.position_at_end(bb);
 
                     self.locals.enter();
-                    for (name, arg) in arg_names.iter().zip(func.get_params()) {
+                    for (arg, name) in func.get_params().into_iter().zip(arg_names) {
                         let ptr = self.builder.build_alloca(arg.get_type(), name).unwrap();
                         self.builder.build_store(ptr, arg).unwrap();
 
-                        arg.set_name(name);
                         self.locals.define(name, ptr.as_basic_value_enum());
                     }
 
@@ -250,6 +241,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
                     self.locals.exit();
                     self.locals.exit();
+
+                    self.current_func = prev_func;
+                    if let Some(prev_bb) = prev_bb {
+                        self.builder.position_at_end(prev_bb);
+                    }
                 }
                 StmtKind::Return(expr) => {
                     let value = expr.as_ref().map(|expr| self.generate_expr(expr));
@@ -267,6 +263,55 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
 
         returned
+    }
+
+    fn generate_fns(&mut self, stmts: &'a [Stmt]) {
+        for stmt in stmts {
+            if let StmtKind::FnDecl {
+                name,
+                args,
+                return_ty,
+                ..
+            } = &stmt.kind
+            {
+                if self.module.get_function(name).is_some() {
+                    continue;
+                }
+
+                // NOTE: this monstrosity is required because .unzip() requires Default
+                // which is not implemented for BasicMetadataTypeEnum
+                let (arg_names, arg_types) = args.iter().fold(
+                    (
+                        Vec::with_capacity(args.len()),
+                        Vec::with_capacity(args.len()),
+                    ),
+                    |(mut names, mut types), stmt| match &stmt.kind {
+                        StmtKind::VarDecl(VarDecl { name, ty, .. }) => {
+                            names.push(name);
+                            types.push(ty.as_llvm_type(self.context).try_into().unwrap());
+
+                            (names, types)
+                        }
+                        _ => {
+                            unreachable!("function arguments are always variable declarations")
+                        }
+                    },
+                );
+
+                let ret_ty = return_ty.as_llvm_type(self.context);
+                let fn_type =
+                    if let Ok(ty) = std::convert::TryInto::<BasicTypeEnum>::try_into(ret_ty) {
+                        ty.fn_type(&arg_types, false)
+                    } else {
+                        ret_ty.into_void_type().fn_type(&arg_types, false)
+                    };
+
+                let func = self.module.add_function(name, fn_type, None);
+                for (arg, name) in func.get_params().iter().zip(arg_names) {
+                    arg.set_name(name);
+                }
+            }
+        }
     }
 
     fn generate_if(
@@ -381,7 +426,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             ExprKind::Variable(name) => self
                 .builder
                 .build_load(
-                    llvm_ty,
+                    std::convert::TryInto::<BasicTypeEnum>::try_into(llvm_ty).unwrap(),
                     self.locals.get(name).unwrap().into_pointer_value(),
                     "load",
                 )
@@ -492,7 +537,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         let l = self
                             .builder
                             .build_load(
-                                ty.as_llvm_type(self.context),
+                                std::convert::TryInto::<BasicTypeEnum>::try_into(llvm_ty).unwrap(),
                                 ptr.into_pointer_value(),
                                 "load_lhs",
                             )

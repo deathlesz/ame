@@ -104,6 +104,7 @@ pub fn unify(t1: &Type, t2: &Type, ctx: &mut TypeCtx) -> Result<()> {
                 Ok(())
             }
         }
+        (Type::None, Type::None) => Ok(()),
         (Type::Other(s1), Type::Other(s2)) if s1 == s2 => Ok(()),
 
         _ => Err(TypeError::CannotUnify(t1, t2)),

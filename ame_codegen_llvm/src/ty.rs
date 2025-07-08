@@ -1,5 +1,5 @@
 use ame_types::{FloatKind, IntKind, Type};
-use inkwell::{context::Context, types::BasicTypeEnum};
+use inkwell::{context::Context, types::AnyTypeEnum};
 
 pub trait AsLLVMType<'ctx> {
     type Out;
@@ -8,7 +8,7 @@ pub trait AsLLVMType<'ctx> {
 }
 
 impl<'ctx> AsLLVMType<'ctx> for Type {
-    type Out = BasicTypeEnum<'ctx>;
+    type Out = AnyTypeEnum<'ctx>;
 
     fn as_llvm_type(&self, ctx: &'ctx Context) -> Self::Out {
         match self {
@@ -25,6 +25,7 @@ impl<'ctx> AsLLVMType<'ctx> for Type {
             Self::Bool => ctx.bool_type().into(),
             Self::Var(_, ame_types::Constraint::Integer) => ctx.i32_type().into(),
             Self::Var(_, ame_types::Constraint::Float) => ctx.f64_type().into(),
+            Self::None => ctx.void_type().into(),
 
             other => panic!("cannot lower {other:?} to llvm type"),
         }

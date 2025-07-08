@@ -20,6 +20,7 @@ impl<'a> Inferrer<'a> {
     }
 
     pub fn infer(&mut self, ast: &mut [Stmt]) -> Result<()> {
+        self.infer_and_define_functions(ast)?;
         for stmt in ast {
             self.infer_stmt(stmt)?;
         }
@@ -61,17 +62,13 @@ impl<'a> Inferrer<'a> {
                     unify(&cond.ty, &Type::Bool, self.tcx)?;
 
                     self.env.enter();
-                    for stmt in body {
-                        self.infer_stmt(stmt)?;
-                    }
+                    self.infer(body)?;
                     self.env.exit();
                 }
 
                 if let Some(else_stmts) = else_body {
                     self.env.enter();
-                    for stmt in else_stmts {
-                        self.infer_stmt(stmt)?;
-                    }
+                    self.infer(else_stmts)?;
                     self.env.exit();
                 }
 
@@ -82,28 +79,21 @@ impl<'a> Inferrer<'a> {
                 unify(&cond.ty, &Type::Bool, self.tcx)?;
 
                 self.env.enter();
-                for stmt in body {
-                    self.infer_stmt(stmt)?;
-                }
+                self.infer(body)?;
                 self.env.exit();
 
                 Ok(())
             }
             StmtKind::FnDecl {
-                name,
                 body,
                 args,
                 return_ty,
+                ..
             } => {
-                let mut arg_tys = vec![];
-
                 self.env.enter();
                 for arg in args {
-                    self.infer_stmt(arg)?;
-
                     match &arg.kind {
                         StmtKind::VarDecl(VarDecl { name, ty, .. }) => {
-                            arg_tys.push(ty.clone());
                             self.env.define(name.clone(), ty.clone());
                         }
                         _ => unreachable!("function arguments are always variable declarations"),
@@ -112,6 +102,7 @@ impl<'a> Inferrer<'a> {
 
                 self.env.enter();
 
+                // TODO: probably should just add returns to self.infer idk
                 let returns = self.infer_and_collect_returns(body)?;
                 for ty in returns {
                     unify(&ty, return_ty, self.tcx)?;
@@ -120,10 +111,7 @@ impl<'a> Inferrer<'a> {
                 self.env.exit();
                 self.env.exit();
 
-                self.env
-                    .define(name.clone(), Type::Fn(arg_tys, Box::new(return_ty.clone())));
-
-                Ok(())
+                Ok(()) // should've been inferred already
             }
             StmtKind::Return(expr) => {
                 if let Some(expr) = expr {
@@ -143,6 +131,7 @@ impl<'a> Inferrer<'a> {
     fn infer_and_collect_returns(&mut self, stmts: &mut [Stmt]) -> Result<Vec<Type>> {
         let mut returns = vec![];
 
+        self.infer_and_define_functions(stmts)?;
         for stmt in stmts {
             self.infer_stmt(stmt)?;
 
@@ -150,7 +139,7 @@ impl<'a> Inferrer<'a> {
                 StmtKind::Return(expr) => returns.push(
                     expr.as_ref()
                         .map(|expr| expr.ty.clone())
-                        .unwrap_or(Type::Unknown)
+                        .unwrap_or(Type::None)
                         .resolve(self.tcx),
                 ),
                 StmtKind::If {
@@ -158,21 +147,59 @@ impl<'a> Inferrer<'a> {
                     else_body,
                 } => {
                     for (_, body) in branches {
+                        self.env.enter();
                         returns.extend(self.infer_and_collect_returns(body)?);
+                        self.env.exit();
                     }
 
                     if let Some(body) = else_body {
+                        self.env.enter();
                         returns.extend(self.infer_and_collect_returns(body)?);
+                        self.env.exit();
                     }
                 }
                 StmtKind::While { body, .. } => {
+                    self.env.enter();
                     returns.extend(self.infer_and_collect_returns(body)?);
+                    self.env.exit();
                 }
                 _ => {}
             }
         }
 
         Ok(returns)
+    }
+
+    fn infer_and_define_functions(&mut self, stmts: &mut [Stmt]) -> Result<()> {
+        for stmt in stmts {
+            if let StmtKind::FnDecl {
+                name,
+                args,
+                return_ty,
+                ..
+            } = &mut stmt.kind
+            {
+                let mut arg_tys = vec![];
+
+                self.env.enter();
+                for arg in args {
+                    self.infer_stmt(arg)?;
+
+                    match &arg.kind {
+                        StmtKind::VarDecl(VarDecl { ty, .. }) => {
+                            arg_tys.push(ty.clone());
+                        }
+                        _ => unreachable!("function arguments are always variable declarations"),
+                    }
+                }
+                self.env.exit();
+
+                self.env
+                    .define(name.clone(), Type::Fn(arg_tys, Box::new(return_ty.clone())));
+            }
+        }
+
+        Ok(())
     }
 
     fn infer_expr_type(&mut self, expr: &mut Expr) -> Result<Type> {
@@ -275,18 +302,7 @@ impl<'a> Inferrer<'a> {
                         _ => unreachable!("function type is Fn, duh"),
                     }
                 } else {
-                    let mut arg_tys = vec![];
-                    for arg in args.iter_mut() {
-                        self.infer_expr_type(arg)?;
-
-                        arg_tys.push(arg.ty.clone());
-                    }
-
-                    let ret_ty = Type::var(self.tcx);
-                    let ty = Type::Fn(arg_tys, Box::new(ret_ty.clone()));
-                    self.env.define(name.clone(), ty.clone());
-
-                    ret_ty
+                    panic!("function `{name}` is not defined");
                 }
             }
         };
@@ -345,10 +361,10 @@ impl<'a> Inferrer<'a> {
                 }
             }
             StmtKind::FnDecl {
-                name,
                 args,
                 body,
-                return_ty: _,
+                return_ty,
+                ..
             } => {
                 for arg in args {
                     self.resolve_stmt(arg);
@@ -358,10 +374,7 @@ impl<'a> Inferrer<'a> {
                     self.resolve_stmt(stmt);
                 }
 
-                self.env
-                    .get(name)
-                    .expect("fn should be defined probably")
-                    .resolve(self.tcx);
+                *return_ty = return_ty.resolve(self.tcx);
             }
             StmtKind::Return(expr) => {
                 if let Some(expr) = expr {
