@@ -54,7 +54,7 @@ pub struct VarDecl {
 }
 
 // TODO: somehow don't repeat here?
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AssignOp {
     Assign,
     Add,
@@ -80,8 +80,14 @@ impl TryFrom<&Token> for AssignOp {
             TokenKind::MinusAssign => Ok(AssignOp::Sub),
             TokenKind::AsteriskAssign => Ok(AssignOp::Mul),
             TokenKind::SlashAssign => Ok(AssignOp::Div),
+            TokenKind::PercentAssign => Ok(AssignOp::Rem),
+            TokenKind::PipeAssign => Ok(AssignOp::BitOr),
+            TokenKind::AmpAssign => Ok(AssignOp::BitAnd),
+            TokenKind::CaretAssign => Ok(AssignOp::BitXor),
+            TokenKind::ShlAssign => Ok(AssignOp::Shl),
+            TokenKind::ShrAssign => Ok(AssignOp::Shr),
 
-            _ => todo!("add more Token -> AssignOp conversions"),
+            ref t => panic!("invalid token -> assign op: {t:?}"),
         }
     }
 }
@@ -95,7 +101,7 @@ impl TryFrom<Token> for AssignOp {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinOp {
     Add,
     Sub,
@@ -128,14 +134,21 @@ impl TryFrom<&Token> for BinOp {
             TokenKind::Asterisk => Ok(BinOp::Mul),
             TokenKind::Slash => Ok(BinOp::Div),
             TokenKind::Percent => Ok(BinOp::Rem),
+            TokenKind::Pipe => Ok(BinOp::BitOr),
+            TokenKind::Amp => Ok(BinOp::BitAnd),
+            TokenKind::Caret => Ok(BinOp::BitXor),
             TokenKind::Eq => Ok(BinOp::Eq),
             TokenKind::Ne => Ok(BinOp::Ne),
             TokenKind::Le => Ok(BinOp::Le),
             TokenKind::Lt => Ok(BinOp::Lt),
             TokenKind::Ge => Ok(BinOp::Ge),
             TokenKind::Gt => Ok(BinOp::Gt),
+            TokenKind::Or => Ok(BinOp::Or),
+            TokenKind::And => Ok(BinOp::And),
+            TokenKind::Shl => Ok(BinOp::Shl),
+            TokenKind::Shr => Ok(BinOp::Shr),
 
-            _ => todo!("add more Token -> BinOp conversions"),
+            ref t => todo!("invalid token -> bin op: {t:?}"),
         }
     }
 }
@@ -155,12 +168,18 @@ impl TryFrom<&AssignOp> for BinOp {
     #[inline]
     fn try_from(op: &AssignOp) -> Result<Self, Self::Error> {
         match op {
+            AssignOp::Assign => Err(()),
+
             AssignOp::Add => Ok(BinOp::Add),
             AssignOp::Sub => Ok(BinOp::Sub),
             AssignOp::Mul => Ok(BinOp::Mul),
             AssignOp::Div => Ok(BinOp::Div),
-
-            _ => todo!("add more AssignOp -> BinOp conversions"),
+            AssignOp::Rem => Ok(BinOp::Rem),
+            AssignOp::Shl => Ok(BinOp::Shl),
+            AssignOp::Shr => Ok(BinOp::Shr),
+            AssignOp::BitOr => Ok(BinOp::BitOr),
+            AssignOp::BitAnd => Ok(BinOp::BitAnd),
+            AssignOp::BitXor => Ok(BinOp::BitXor),
         }
     }
 }

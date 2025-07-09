@@ -310,13 +310,8 @@ impl<'a> Parser<'a> {
             }
 
             let op = self.next().clone();
-            match op.kind {
-                // TODO: add more operators
-                TokenKind::Assign
-                | TokenKind::PlusAssign
-                | TokenKind::MinusAssign
-                | TokenKind::AsteriskAssign
-                | TokenKind::SlashAssign => {
+            match &op.kind {
+                kind if kind.is_assign() => {
                     if !matches!(lhs.kind, ExprKind::Variable(_)) {
                         return Err(ParseError::InvalidLValue);
                     }
@@ -332,18 +327,9 @@ impl<'a> Parser<'a> {
                         ty: Type::default(),
                     }
                 }
-                TokenKind::Plus
-                | TokenKind::Minus
-                | TokenKind::Asterisk
-                | TokenKind::Slash
-                | TokenKind::Percent
-                | TokenKind::Eq
-                | TokenKind::Ne
-                | TokenKind::Le
-                | TokenKind::Lt
-                | TokenKind::Ge
-                | TokenKind::Gt => {
+                kind if kind.is_binary() => {
                     let rhs = self.parse_expr(r_bp)?;
+
                     lhs = Expr {
                         kind: ExprKind::Binary(
                             op.try_into().unwrap(),
@@ -353,7 +339,7 @@ impl<'a> Parser<'a> {
                         ty: Type::default(),
                     };
                 }
-                _ => todo!(),
+                t => panic!("unhandled token in expr: {t:?}"),
             }
         }
 
@@ -409,24 +395,31 @@ impl<'a> Parser<'a> {
 }
 
 #[inline]
-const fn infix_binding_power(op: &Token) -> Option<(u8, u8)> {
-    // TODO: add more operators
-    match op.kind {
-        TokenKind::Assign
-        | TokenKind::PlusAssign
-        | TokenKind::MinusAssign
-        | TokenKind::AsteriskAssign
-        | TokenKind::SlashAssign => Some((2, 1)), // right-associative so you can do `a = b += c`
-        TokenKind::Eq
-        | TokenKind::Ne
-        | TokenKind::Le
-        | TokenKind::Lt
-        | TokenKind::Ge
-        | TokenKind::Gt => Some((3, 4)),
-        TokenKind::Plus | TokenKind::Minus => Some((5, 6)),
-        TokenKind::Asterisk | TokenKind::Slash | TokenKind::Percent => Some((7, 8)),
-        _ => None,
-    }
+pub const fn infix_binding_power(op: &Token) -> Option<(u8, u8)> {
+    use TokenKind::*;
+
+    Some(match op.kind {
+        // assignment operators (right-associative)
+        Assign | PlusAssign | MinusAssign | AsteriskAssign | SlashAssign | PercentAssign
+        | AmpAssign | PipeAssign | CaretAssign | ShlAssign | ShrAssign => (1, 0),
+
+        Or => (2, 3),
+        And => (4, 5),
+
+        Pipe => (6, 7),
+        Caret => (8, 9),
+        Amp => (10, 11),
+
+        Eq | Ne | Lt | Le | Gt | Ge => (12, 13),
+
+        Plus | Minus => (14, 15),
+
+        Shl | Shr => (16, 17),
+
+        Asterisk | Slash | Percent => (18, 19),
+
+        _ => return None,
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

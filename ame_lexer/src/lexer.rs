@@ -131,7 +131,6 @@ impl<'a> Lexer<'a> {
                 TokenKind::Literal { kind }
             }
 
-            // TODO: add more operators later
             '+' => or_assign!(TokenKind::PlusAssign, TokenKind::Plus),
             '-' => or_assign!(TokenKind::MinusAssign, TokenKind::Minus),
             '*' => or_assign!(TokenKind::AsteriskAssign, TokenKind::Asterisk),
@@ -166,8 +165,44 @@ impl<'a> Lexer<'a> {
 
             '=' => or_assign!(TokenKind::Eq, TokenKind::Assign),
             '!' => or_assign!(TokenKind::Ne, TokenKind::Bang),
-            '>' => or_assign!(TokenKind::Ge, TokenKind::Gt),
-            '<' => or_assign!(TokenKind::Le, TokenKind::Lt),
+            '>' => {
+                if self.peek() == '=' {
+                    self.bump();
+
+                    TokenKind::Ge
+                } else if self.peek() == '>' {
+                    self.bump();
+
+                    if self.peek() == '=' {
+                        self.bump();
+
+                        TokenKind::ShrAssign
+                    } else {
+                        TokenKind::Shr
+                    }
+                } else {
+                    TokenKind::Gt
+                }
+            }
+            '<' => {
+                if self.peek() == '=' {
+                    self.bump();
+
+                    TokenKind::Le
+                } else if self.peek() == '<' {
+                    self.bump();
+
+                    if self.peek() == '=' {
+                        self.bump();
+
+                        TokenKind::ShlAssign
+                    } else {
+                        TokenKind::Shl
+                    }
+                } else {
+                    TokenKind::Lt
+                }
+            }
 
             ':' => TokenKind::Colon,
             ';' => TokenKind::Semicolon,
@@ -560,11 +595,15 @@ inside of it
         TokenKind::Eof,
     ]);
 
-    test!(test_multi_char_operators: "== != <= >= && || += -= *= /= %= &= |=" -> &[
+    test!(test_multi_char_operators: "== != <= << <<= >= >> >>= && || += -= *= /= %= &= |=" -> &[
         TokenKind::Eq,
         TokenKind::Ne,
         TokenKind::Le,
+        TokenKind::Shl,
+        TokenKind::ShlAssign,
         TokenKind::Ge,
+        TokenKind::Shr,
+        TokenKind::ShrAssign,
         TokenKind::And,
         TokenKind::Or,
         TokenKind::PlusAssign,

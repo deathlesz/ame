@@ -31,6 +31,10 @@ pub enum TokenKind {
     PipeAssign,
     Caret,
     CaretAssign,
+    Shl,
+    ShlAssign,
+    Shr,
+    ShrAssign,
     Assign,
 
     Eq,
@@ -62,6 +66,43 @@ pub enum TokenKind {
 
     Unknown(char),
     Eof,
+}
+
+impl TokenKind {
+    pub fn is_binary(&self) -> bool {
+        matches!(
+            self,
+            TokenKind::Plus
+                | TokenKind::Minus
+                | TokenKind::Asterisk
+                | TokenKind::Slash
+                | TokenKind::Percent
+                | TokenKind::Shl
+                | TokenKind::Shr
+                | TokenKind::Eq
+                | TokenKind::Ne
+                | TokenKind::Le
+                | TokenKind::Lt
+                | TokenKind::Ge
+                | TokenKind::Gt
+                | TokenKind::And
+                | TokenKind::Or
+        )
+    }
+
+    pub fn is_assign(&self) -> bool {
+        matches!(
+            self,
+            TokenKind::Assign
+                | TokenKind::PlusAssign
+                | TokenKind::MinusAssign
+                | TokenKind::AsteriskAssign
+                | TokenKind::SlashAssign
+                | TokenKind::PercentAssign
+                | TokenKind::ShlAssign
+                | TokenKind::ShrAssign
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

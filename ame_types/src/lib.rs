@@ -194,6 +194,15 @@ pub enum IntKind {
     Uint64,
 }
 
+impl IntKind {
+    pub fn unsigned(&self) -> bool {
+        matches!(
+            self,
+            Self::Uint8 | Self::Uint16 | Self::Uint32 | Self::Uint64
+        )
+    }
+}
+
 impl std::str::FromStr for IntKind {
     type Err = ();
 

@@ -1,6 +1,6 @@
 use ame_common::ScopeStack;
 use ame_lexer::LiteralKind;
-use ame_types::{unify, Type, TypeCtx, TypeError};
+use ame_types::{unify, Constraint, Type, TypeCtx, TypeError};
 
 use crate::{AssignOp, BinOp, Expr, ExprKind, Stmt, StmtKind, VarDecl};
 
@@ -274,9 +274,11 @@ impl<'a> Inferrer<'a> {
                     AssignOp::Shl | AssignOp::Shr => {
                         // TODO: add error for this or modify `TypeError::CannotUnify`
                         match rtype {
-                            Type::Int(_) => {}
+                            Type::Int(_) | Type::Var(_, Constraint::Integer) => {}
                             _ => panic!("you can shl/shr only by integer values"),
                         }
+
+                        unify(&ltype, &rtype, self.tcx)?;
 
                         ltype
                     }
