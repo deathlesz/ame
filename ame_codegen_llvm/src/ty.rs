@@ -1,5 +1,6 @@
+use ame_ast::BinOp;
 use ame_types::{FloatKind, IntKind, Type};
-use inkwell::{context::Context, types::AnyTypeEnum};
+use inkwell::{context::Context, types::AnyTypeEnum, FloatPredicate, IntPredicate};
 
 pub trait AsLLVMType<'ctx> {
     type Out;
@@ -10,6 +11,7 @@ pub trait AsLLVMType<'ctx> {
 impl<'ctx> AsLLVMType<'ctx> for Type {
     type Out = AnyTypeEnum<'ctx>;
 
+    #[inline]
     fn as_llvm_type(&self, ctx: &'ctx Context) -> Self::Out {
         match self {
             Self::Int(kind) => match kind {
@@ -28,6 +30,70 @@ impl<'ctx> AsLLVMType<'ctx> for Type {
             Self::None => ctx.void_type().into(),
 
             other => panic!("cannot lower {other:?} to llvm type"),
+        }
+    }
+}
+
+pub trait AsIntPredicate {
+    fn as_int_predicate(&self, signed: bool) -> IntPredicate;
+}
+
+impl AsIntPredicate for BinOp {
+    #[inline]
+    fn as_int_predicate(&self, unsigned: bool) -> IntPredicate {
+        match self {
+            BinOp::Eq => IntPredicate::EQ,
+            BinOp::Ne => IntPredicate::NE,
+            BinOp::Le => {
+                if unsigned {
+                    IntPredicate::ULE
+                } else {
+                    IntPredicate::SLE
+                }
+            }
+            BinOp::Lt => {
+                if unsigned {
+                    IntPredicate::ULT
+                } else {
+                    IntPredicate::SLT
+                }
+            }
+            BinOp::Ge => {
+                if unsigned {
+                    IntPredicate::UGE
+                } else {
+                    IntPredicate::SGE
+                }
+            }
+            BinOp::Gt => {
+                if unsigned {
+                    IntPredicate::UGT
+                } else {
+                    IntPredicate::SGT
+                }
+            }
+
+            o => unreachable!("binary operation {o:?} doesn't have correspoding int predicate"),
+        }
+    }
+}
+
+pub trait AsFloatPredicate {
+    fn as_float_predicate(&self) -> FloatPredicate;
+}
+
+impl AsFloatPredicate for BinOp {
+    #[inline]
+    fn as_float_predicate(&self) -> FloatPredicate {
+        match self {
+            BinOp::Eq => FloatPredicate::OEQ,
+            BinOp::Ne => FloatPredicate::ONE,
+            BinOp::Le => FloatPredicate::OLE,
+            BinOp::Lt => FloatPredicate::OLT,
+            BinOp::Ge => FloatPredicate::OGE,
+            BinOp::Gt => FloatPredicate::OGT,
+
+            o => unreachable!("binary operation {o:?} doesn't have correspoding int predicate"),
         }
     }
 }

@@ -7,7 +7,6 @@ use inkwell::{
     targets::{Target, TargetMachine, TargetTriple},
     types::{BasicType, BasicTypeEnum},
     values::{BasicValue, BasicValueEnum, FunctionValue},
-    IntPredicate,
 };
 
 use ame_ast::{AssignOp, BinOp, Expr, ExprKind, Stmt, StmtKind, VarDecl};
@@ -18,7 +17,7 @@ use ame_types::{Type, TypeCtx};
 mod options;
 mod ty;
 
-use crate::ty::AsLLVMType;
+use crate::ty::{AsFloatPredicate, AsIntPredicate, AsLLVMType};
 pub use options::*;
 
 pub struct CodeGen<'a, 'ctx> {
@@ -432,94 +431,23 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 )
                 .unwrap(),
             ExprKind::Binary(op, lhs, rhs) => {
-                let l = self.generate_expr(lhs);
-                let r = self.generate_expr(rhs);
+                let (l, r) = (self.generate_expr(lhs), self.generate_expr(rhs));
 
-                match ty {
-                    Type::Int(_) => match op {
-                        // add uint handling for div/rem
-                        BinOp::Add => self.builder.build_int_add(
-                            l.into_int_value(),
-                            r.into_int_value(),
-                            "add",
-                        ),
-                        BinOp::Sub => self.builder.build_int_sub(
-                            l.into_int_value(),
-                            r.into_int_value(),
-                            "sub",
-                        ),
-                        BinOp::Mul => self.builder.build_int_mul(
-                            l.into_int_value(),
-                            r.into_int_value(),
-                            "mul",
-                        ),
-                        BinOp::Div => self.builder.build_int_signed_div(
-                            l.into_int_value(),
-                            r.into_int_value(),
-                            "div",
-                        ),
-                        BinOp::Rem => self.builder.build_int_signed_rem(
-                            l.into_int_value(),
-                            r.into_int_value(),
-                            "rem",
-                        ),
-                        _ => todo!("add more binops for ints in codegen"),
-                    }
-                    .unwrap()
-                    .into(),
-                    Type::Float(_) => match op {
-                        BinOp::Add => self.builder.build_float_add(
-                            l.into_float_value(),
-                            r.into_float_value(),
-                            "add",
-                        ),
-                        BinOp::Sub => self.builder.build_float_sub(
-                            l.into_float_value(),
-                            r.into_float_value(),
-                            "sub",
-                        ),
-                        BinOp::Mul => self.builder.build_float_mul(
-                            l.into_float_value(),
-                            r.into_float_value(),
-                            "mul",
-                        ),
-                        BinOp::Div => self.builder.build_float_div(
-                            l.into_float_value(),
-                            r.into_float_value(),
-                            "div",
-                        ),
-                        BinOp::Rem => self.builder.build_float_rem(
-                            l.into_float_value(),
-                            r.into_float_value(),
-                            "rem",
-                        ),
-                        _ => todo!("add more binops for floats in codegen"),
-                    }
-                    .unwrap()
-                    .into(),
-                    Type::Bool => match op {
-                        // TODO: add support for floats here
-                        BinOp::Eq | BinOp::Ne | BinOp::Le | BinOp::Lt | BinOp::Ge | BinOp::Gt => {
-                            self.builder
-                                .build_int_compare(
-                                    binop_to_int_predicate(op),
-                                    l.into_int_value(),
-                                    r.into_int_value(),
-                                    "cmp",
-                                )
-                                .unwrap()
-                                .into()
-                        }
-                        _ => todo!("add more binops for bool in codegen"),
-                    },
-                    ty => todo!("add binops for {ty:?} in codegen"),
-                }
+                self.generate_binop(
+                    ty,
+                    *op,
+                    l,
+                    lhs.ty.resolve(&self.tcx),
+                    r,
+                    rhs.ty.resolve(&self.tcx),
+                )
             }
             ExprKind::Assign { op, lhs, rhs } => {
                 let ptr = match &lhs.kind {
                     ExprKind::Variable(name) => *self.locals.get(name).unwrap(),
                     _ => unreachable!("assignment lhs can only be variable"),
-                };
+                }
+                .into_pointer_value();
 
                 let ty = lhs.ty.resolve(&self.tcx);
 
@@ -527,94 +455,34 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     AssignOp::Assign => {
                         let rhs = self.generate_expr(rhs);
 
-                        self.builder
-                            .build_store(ptr.into_pointer_value(), rhs)
-                            .unwrap();
+                        self.builder.build_store(ptr, rhs).unwrap();
 
-                        ptr
+                        ptr.into()
                     }
-                    AssignOp::Add | AssignOp::Sub | AssignOp::Mul | AssignOp::Div => {
+                    _ => {
                         let l = self
                             .builder
                             .build_load(
                                 std::convert::TryInto::<BasicTypeEnum>::try_into(llvm_ty).unwrap(),
-                                ptr.into_pointer_value(),
+                                ptr,
                                 "load_lhs",
                             )
                             .unwrap();
                         let r = self.generate_expr(rhs);
 
-                        let result: BasicValueEnum<'_> = match ty {
-                            Type::Int(_) => match op {
-                                // add uint handling for div/rem
-                                AssignOp::Add => self.builder.build_int_add(
-                                    l.into_int_value(),
-                                    r.into_int_value(),
-                                    "add",
-                                ),
-                                AssignOp::Sub => self.builder.build_int_sub(
-                                    l.into_int_value(),
-                                    r.into_int_value(),
-                                    "sub",
-                                ),
-                                AssignOp::Mul => self.builder.build_int_mul(
-                                    l.into_int_value(),
-                                    r.into_int_value(),
-                                    "mul",
-                                ),
-                                AssignOp::Div => self.builder.build_int_signed_div(
-                                    l.into_int_value(),
-                                    r.into_int_value(),
-                                    "div",
-                                ),
-                                AssignOp::Rem => self.builder.build_int_signed_rem(
-                                    l.into_int_value(),
-                                    r.into_int_value(),
-                                    "rem",
-                                ),
-                                _ => todo!("add more binops for ints in codegen"),
-                            }
-                            .unwrap()
-                            .into(),
-                            Type::Float(_) => match op {
-                                AssignOp::Add => self.builder.build_float_add(
-                                    l.into_float_value(),
-                                    r.into_float_value(),
-                                    "add",
-                                ),
-                                AssignOp::Sub => self.builder.build_float_sub(
-                                    l.into_float_value(),
-                                    r.into_float_value(),
-                                    "sub",
-                                ),
-                                AssignOp::Mul => self.builder.build_float_mul(
-                                    l.into_float_value(),
-                                    r.into_float_value(),
-                                    "mul",
-                                ),
-                                AssignOp::Div => self.builder.build_float_div(
-                                    l.into_float_value(),
-                                    r.into_float_value(),
-                                    "div",
-                                ),
-                                AssignOp::Rem => self.builder.build_float_rem(
-                                    l.into_float_value(),
-                                    r.into_float_value(),
-                                    "rem",
-                                ),
-                                _ => todo!("add more binops for floats in codegen"),
-                            }
-                            .unwrap()
-                            .into(),
-                            ty => todo!("add binops for {ty:?} in codegen"),
-                        };
+                        let result = self.generate_binop(
+                            ty,
+                            op.try_into()
+                                .expect("assign case is handled above, otherwise can't panic"),
+                            l,
+                            lhs.ty.resolve(&self.tcx),
+                            r,
+                            rhs.ty.resolve(&self.tcx),
+                        );
 
-                        self.builder
-                            .build_store(ptr.into_pointer_value(), result)
-                            .unwrap();
-                        ptr
+                        self.builder.build_store(ptr, result).unwrap();
+                        ptr.into()
                     }
-                    _ => todo!(),
                 }
             }
             ExprKind::FnCall(name, args) => {
@@ -633,18 +501,91 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             }
         }
     }
-}
 
-#[inline]
-fn binop_to_int_predicate(op: &BinOp) -> IntPredicate {
-    match op {
-        BinOp::Eq => IntPredicate::EQ,
-        BinOp::Ne => IntPredicate::NE,
-        BinOp::Le => IntPredicate::SLE,
-        BinOp::Lt => IntPredicate::SLT,
-        BinOp::Ge => IntPredicate::SGE,
-        BinOp::Gt => IntPredicate::SGT,
+    fn generate_binop(
+        &mut self,
+        ty: Type,
+        op: BinOp,
+        l: BasicValueEnum<'ctx>,
+        l_ty: Type,
+        r: BasicValueEnum<'ctx>,
+        r_ty: Type,
+    ) -> BasicValueEnum<'ctx> {
+        match ty {
+            Type::Int(kind) => {
+                let (l, r) = (l.into_int_value(), r.into_int_value());
 
-        _ => unreachable!("never called with non-existent op"),
+                match op {
+                    // add uint handling for div/rem
+                    BinOp::Add => self.builder.build_int_add(l, r, "add"),
+                    BinOp::Sub => self.builder.build_int_sub(l, r, "sub"),
+                    BinOp::Mul => self.builder.build_int_mul(l, r, "mul"),
+                    BinOp::Div => match kind.unsigned() {
+                        false => self.builder.build_int_signed_div(l, r, "div"),
+                        true => self.builder.build_int_unsigned_div(l, r, "divu"),
+                    },
+                    BinOp::Rem => match kind.unsigned() {
+                        false => self.builder.build_int_signed_rem(l, r, "rem"),
+                        true => self.builder.build_int_unsigned_rem(l, r, "remu"),
+                    },
+                    BinOp::Shl => self.builder.build_left_shift(l, r, "shl"),
+                    BinOp::Shr => self
+                        .builder
+                        .build_right_shift(l, r, !kind.unsigned(), "rhs"),
+                    BinOp::BitOr => self.builder.build_or(l, r, "bitor"),
+                    BinOp::BitAnd => self.builder.build_and(l, r, "bitor"),
+                    BinOp::BitXor => self.builder.build_xor(l, r, "bitor"),
+                    o => panic!("invalid binary operation for int: {o:?}"),
+                }
+            }
+            .unwrap()
+            .into(),
+            Type::Float(_) => {
+                let (l, r) = (l.into_float_value(), r.into_float_value());
+
+                match op {
+                    BinOp::Add => self.builder.build_float_add(l, r, "addf"),
+                    BinOp::Sub => self.builder.build_float_sub(l, r, "subf"),
+                    BinOp::Mul => self.builder.build_float_mul(l, r, "mulf"),
+                    BinOp::Div => self.builder.build_float_div(l, r, "divf"),
+                    BinOp::Rem => self.builder.build_float_rem(l, r, "remf"),
+                    o => panic!("invalid binary operation for float: {o:?}"),
+                }
+            }
+            .unwrap()
+            .into(),
+            Type::Bool => match op {
+                BinOp::Eq | BinOp::Ne | BinOp::Le | BinOp::Lt | BinOp::Ge | BinOp::Gt => {
+                    match (l_ty, r_ty) {
+                        (Type::Int(k1), Type::Int(k2)) if k1 == k2 => {
+                            self.builder.build_int_compare(
+                                op.as_int_predicate(k1.unsigned()),
+                                l.into_int_value(),
+                                r.into_int_value(),
+                                "cmp",
+                            )
+                        }
+                        (Type::Float(_), Type::Float(_)) => self.builder.build_float_compare(
+                            op.as_float_predicate(),
+                            l.into_float_value(),
+                            r.into_float_value(),
+                            "cmpf",
+                        ),
+                        (a, b) => unreachable!("can't compare {a:?} and {b:?}"),
+                    }
+                }
+                // TODO: make it short-curcuit (i.e. in a && b, if a is false, b is not evaluated), to do this add basic blocks and cmps
+                BinOp::Or => self
+                    .builder
+                    .build_or(l.into_int_value(), r.into_int_value(), "or"),
+                BinOp::And => self
+                    .builder
+                    .build_and(l.into_int_value(), r.into_int_value(), "and"),
+                o => panic!("invalid binary operation for bool: {o:?}"),
+            }
+            .unwrap()
+            .into(),
+            _ => todo!("unsupported type for binary operation"),
+        }
     }
 }
