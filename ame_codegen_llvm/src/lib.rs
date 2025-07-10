@@ -323,6 +323,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             return;
         };
 
+        let last_ifcont_block = self.context.append_basic_block(func, "ifcont");
+
         for (cond, body) in rest {
             let cond = self.generate_expr(cond);
             let cmp = cond.into_int_value();
@@ -342,7 +344,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
             if !returned {
                 self.builder
-                    .build_unconditional_branch(ifcont_block)
+                    .build_unconditional_branch(last_ifcont_block)
                     .unwrap();
             }
 
@@ -358,10 +360,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         } else {
             None
         };
-        let ifcont_block = self.context.append_basic_block(func, "ifcont");
 
         self.builder
-            .build_conditional_branch(cmp, then_block, else_block.unwrap_or(ifcont_block))
+            .build_conditional_branch(cmp, then_block, else_block.unwrap_or(last_ifcont_block))
             .unwrap();
 
         self.builder.position_at_end(then_block);
@@ -372,7 +373,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         if !returned {
             self.builder
-                .build_unconditional_branch(ifcont_block)
+                .build_unconditional_branch(last_ifcont_block)
                 .unwrap();
         }
 
@@ -385,12 +386,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
             if !returned {
                 self.builder
-                    .build_unconditional_branch(ifcont_block)
+                    .build_unconditional_branch(last_ifcont_block)
                     .unwrap();
             }
         }
 
-        self.builder.position_at_end(ifcont_block);
+        self.builder.position_at_end(last_ifcont_block);
     }
 
     fn generate_expr(&mut self, expr: &Expr) -> BasicValueEnum<'ctx> {
