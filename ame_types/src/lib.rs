@@ -58,6 +58,8 @@ impl std::str::FromStr for Type {
             Ok(Self::Int(kind))
         } else if let Ok(kind) = s.parse::<FloatKind>() {
             Ok(Self::Float(kind))
+        } else if s == "string" {
+            Ok(Self::String)
         } else if s == "false" || s == "true" {
             Ok(Self::Bool)
         } else {
@@ -68,15 +70,7 @@ impl std::str::FromStr for Type {
 
 impl From<String> for Type {
     fn from(s: String) -> Self {
-        if let Ok(kind) = s.parse::<IntKind>() {
-            Self::Int(kind)
-        } else if let Ok(kind) = s.parse::<FloatKind>() {
-            Self::Float(kind)
-        } else if s == "false" || s == "true" {
-            Self::Bool
-        } else {
-            Self::Other(s)
-        }
+        s.parse().unwrap()
     }
 }
 

@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 
 pub use inkwell::context::Context;
 use inkwell::{
@@ -6,7 +6,8 @@ use inkwell::{
     module::{Linkage, Module},
     targets::{Target, TargetMachine, TargetTriple},
     types::{BasicType, BasicTypeEnum},
-    values::{BasicValue, BasicValueEnum, FunctionValue},
+    values::{BasicValue, BasicValueEnum, FunctionValue, GlobalValue},
+    AddressSpace,
 };
 
 use ame_ast::{AssignOp, BinOp, Expr, ExprKind, Stmt, StmtKind, VarDecl};
@@ -25,6 +26,7 @@ pub struct CodeGen<'a, 'ctx> {
     tcx: TypeCtx,
 
     locals: ScopeStack<&'a String, BasicValueEnum<'ctx>>,
+    strings: HashMap<String, GlobalValue<'ctx>>,
 
     context: &'ctx Context,
     module: Module<'ctx>,
@@ -48,6 +50,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             tcx,
 
             locals: ScopeStack::new(),
+            strings: HashMap::new(),
 
             context,
             module,
@@ -158,7 +161,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         .unwrap();
 
                     if let Some(init_expr) = init_expr {
-                        let expr = self.generate_expr(init_expr);
+                        let expr = self.generate_nonvoid_expr(init_expr);
 
                         self.builder.build_store(var, expr).unwrap();
                     }
@@ -177,7 +180,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 }
                 StmtKind::While { cond, body } => {
                     if let Some(func) = self.current_func {
-                        let cond_generated = self.generate_expr(cond);
+                        let cond_generated = self.generate_nonvoid_expr(cond);
                         let cmp = cond_generated.into_int_value();
 
                         let do_block = self.context.append_basic_block(func, "do");
@@ -194,7 +197,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         self.locals.exit();
 
                         if !returned {
-                            let cond_generated = self.generate_expr(cond);
+                            let cond_generated = self.generate_nonvoid_expr(cond);
                             let cmp = cond_generated.into_int_value();
 
                             self.builder
@@ -249,7 +252,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     }
                 }
                 StmtKind::Return(expr) => {
-                    let value = expr.as_ref().map(|expr| self.generate_expr(expr));
+                    let value = expr.as_ref().and_then(|expr| self.generate_expr(expr));
 
                     self.builder
                         .build_return(value.as_ref().map(|v| v as &dyn BasicValue<'ctx>))
@@ -258,7 +261,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     returned = true;
                 }
                 StmtKind::ExprStmt(expr) => {
-                    self.generate_expr(expr);
+                    _ = self.generate_expr(expr); // we don't care if it's void
                 }
             }
         }
@@ -338,7 +341,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let last_ifcont_block = self.context.append_basic_block(func, "ifcont");
 
         for (cond, body) in rest {
-            let cond = self.generate_expr(cond);
+            let cond = self.generate_nonvoid_expr(cond);
             let cmp = cond.into_int_value();
 
             let then_block = self.context.append_basic_block(func, "then");
@@ -363,7 +366,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             self.builder.position_at_end(ifcont_block);
         }
 
-        let cond = self.generate_expr(cond);
+        let cond = self.generate_nonvoid_expr(cond);
         let cmp = cond.into_int_value();
 
         let then_block = self.context.append_basic_block(func, "then");
@@ -406,7 +409,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         self.builder.position_at_end(last_ifcont_block);
     }
 
-    fn generate_expr(&mut self, expr: &Expr) -> BasicValueEnum<'ctx> {
+    fn generate_expr(&mut self, expr: &Expr) -> Option<BasicValueEnum<'ctx>> {
         let ty = expr.ty.resolve(&self.tcx);
         let llvm_ty = ty.as_llvm_type(self.context);
 
@@ -416,44 +419,80 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     base,
                     empty: _,
                     value,
-                } => llvm_ty
-                    .into_int_type()
-                    .const_int(
-                        i32::from_str_radix(value.trim(), *base as u32).unwrap() as u64,
-                        false,
-                    )
-                    .into(),
+                } => Some(
+                    llvm_ty
+                        .into_int_type()
+                        .const_int(
+                            i32::from_str_radix(value.trim(), *base as u32).unwrap() as u64,
+                            false,
+                        )
+                        .into(),
+                ),
                 LiteralKind::Float {
                     base: _,
                     empty_exp: _,
                     value,
-                } => llvm_ty
-                    .into_float_type()
-                    .const_float(value.trim().parse().unwrap())
-                    .into(),
-                LiteralKind::String { .. } => {
-                    todo!("add support for string literals in codegen")
-                }
-            },
-            ExprKind::Variable(name) => self
-                .builder
-                .build_load(
-                    std::convert::TryInto::<BasicTypeEnum>::try_into(llvm_ty).unwrap(),
-                    self.locals.get(name).unwrap().into_pointer_value(),
-                    "load",
-                )
-                .unwrap(),
-            ExprKind::Binary(op, lhs, rhs) => {
-                let (l, r) = (self.generate_expr(lhs), self.generate_expr(rhs));
+                } => Some(
+                    llvm_ty
+                        .into_float_type()
+                        .const_float(value.trim().parse().unwrap())
+                        .into(),
+                ),
+                LiteralKind::String { value, .. } => Some({
+                    if let Some(v) = self.strings.get(value) {
+                        v.as_basic_value_enum()
+                    } else {
+                        let string = self.context.const_string(value.as_bytes(), true);
 
-                self.generate_binop(
+                        let global = self.module.add_global(
+                            string.get_type(),
+                            Some(AddressSpace::default()),
+                            "str",
+                        );
+
+                        global.set_constant(true);
+                        global.set_linkage(Linkage::Private);
+                        global.set_initializer(&string);
+
+                        self.strings.insert(value.clone(), global);
+
+                        let i8_zero = self.context.i8_type().const_zero();
+                        unsafe {
+                            self.builder.build_in_bounds_gep(
+                                string.get_type(),
+                                global.as_pointer_value(),
+                                &[i8_zero, i8_zero],
+                                "load_str",
+                            )
+                        }
+                        .unwrap()
+                        .into()
+                    }
+                }),
+            },
+            ExprKind::Variable(name) => Some(
+                self.builder
+                    .build_load(
+                        std::convert::TryInto::<BasicTypeEnum>::try_into(llvm_ty).unwrap(),
+                        self.locals.get(name).unwrap().into_pointer_value(),
+                        "load",
+                    )
+                    .unwrap(),
+            ),
+            ExprKind::Binary(op, lhs, rhs) => {
+                let (l, r) = (
+                    self.generate_nonvoid_expr(lhs),
+                    self.generate_nonvoid_expr(rhs),
+                );
+
+                Some(self.generate_binop(
                     ty,
                     *op,
                     l,
                     lhs.ty.resolve(&self.tcx),
                     r,
                     rhs.ty.resolve(&self.tcx),
-                )
+                ))
             }
             ExprKind::Assign { op, lhs, rhs } => {
                 let ptr = match &lhs.kind {
@@ -466,11 +505,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
                 match op {
                     AssignOp::Assign => {
-                        let rhs = self.generate_expr(rhs);
+                        let rhs = self.generate_nonvoid_expr(rhs);
 
                         self.builder.build_store(ptr, rhs).unwrap();
 
-                        ptr.into()
+                        Some(ptr.into())
                     }
                     _ => {
                         let l = self
@@ -481,7 +520,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                                 "load_lhs",
                             )
                             .unwrap();
-                        let r = self.generate_expr(rhs);
+                        let r = self.generate_nonvoid_expr(rhs);
 
                         let result = self.generate_binop(
                             ty,
@@ -494,7 +533,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         );
 
                         self.builder.build_store(ptr, result).unwrap();
-                        ptr.into()
+                        Some(ptr.into())
                     }
                 }
             }
@@ -503,16 +542,21 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
                 let args = args
                     .iter()
-                    .map(|arg| self.generate_expr(arg).into())
+                    .map(|arg| self.generate_nonvoid_expr(arg).into())
                     .collect::<Vec<_>>();
 
                 self.builder
                     .build_call(func, &args, name)
                     .unwrap()
                     .try_as_basic_value()
-                    .unwrap_left()
+                    .left()
             }
         }
+    }
+
+    fn generate_nonvoid_expr(&mut self, expr: &Expr) -> BasicValueEnum<'ctx> {
+        self.generate_expr(expr)
+            .unwrap_or_else(|| panic!("void expr cannot be used"))
     }
 
     fn generate_binop(
