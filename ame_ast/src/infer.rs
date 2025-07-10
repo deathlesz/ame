@@ -88,30 +88,39 @@ impl<'a> Inferrer<'a> {
                 body,
                 args,
                 return_ty,
+                is_extern,
                 ..
             } => {
-                self.env.enter();
-                for arg in args {
-                    match &arg.kind {
-                        StmtKind::VarDecl(VarDecl { name, ty, .. }) => {
-                            self.env.define(name.clone(), ty.clone());
+                if let Some(body) = body {
+                    self.env.enter();
+                    for arg in args {
+                        match &arg.kind {
+                            StmtKind::VarDecl(VarDecl { name, ty, .. }) => {
+                                self.env.define(name.clone(), ty.clone());
+                            }
+                            _ => {
+                                unreachable!("function arguments are always variable declarations")
+                            }
                         }
-                        _ => unreachable!("function arguments are always variable declarations"),
                     }
+
+                    self.env.enter();
+
+                    // TODO: probably should just add returns to self.infer idk
+                    let returns = self.infer_and_collect_returns(body)?;
+                    for ty in returns {
+                        unify(&ty, return_ty, self.tcx)?;
+                    }
+
+                    self.env.exit();
+                    self.env.exit();
+
+                    Ok(()) // should've been inferred already
+                } else if *is_extern {
+                    Ok(())
+                } else {
+                    panic!("non-extern fns without body aren't allowed")
                 }
-
-                self.env.enter();
-
-                // TODO: probably should just add returns to self.infer idk
-                let returns = self.infer_and_collect_returns(body)?;
-                for ty in returns {
-                    unify(&ty, return_ty, self.tcx)?;
-                }
-
-                self.env.exit();
-                self.env.exit();
-
-                Ok(()) // should've been inferred already
             }
             StmtKind::Return(expr) => {
                 if let Some(expr) = expr {
@@ -372,8 +381,10 @@ impl<'a> Inferrer<'a> {
                     self.resolve_stmt(arg);
                 }
 
-                for stmt in body {
-                    self.resolve_stmt(stmt);
+                if let Some(body) = body {
+                    for stmt in body {
+                        self.resolve_stmt(stmt);
+                    }
                 }
 
                 *return_ty = return_ty.resolve(self.tcx);

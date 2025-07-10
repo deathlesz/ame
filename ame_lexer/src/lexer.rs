@@ -492,13 +492,14 @@ another multiline comment
 inside of it
 */"# -> #1, "comments should be ignored");
 
-    test!(test_keywords: "let if else while fn return" -> &[
+    test!(test_keywords: "let if else while fn return extern" -> &[
         TokenKind::Keyword(Keyword::Let),
         TokenKind::Keyword(Keyword::If),
         TokenKind::Keyword(Keyword::Else),
         TokenKind::Keyword(Keyword::While),
         TokenKind::Keyword(Keyword::Fn),
         TokenKind::Keyword(Keyword::Return),
+        TokenKind::Keyword(Keyword::Extern),
         TokenKind::Eof,
     ]);
 

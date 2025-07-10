@@ -133,6 +133,11 @@ impl<'a> Parser<'a> {
                         kind: StmtKind::Return(expr),
                     }))
                 }
+                Keyword::Extern => Err(ParseError::Unexpected {
+                    got: kw.clone(),
+                    expected: "fn(extern)".into(),
+                    span: token.span,
+                }),
             },
             TokenKind::Eof => Ok(None),
             TokenKind::Rbrace => Ok(None),
@@ -232,6 +237,16 @@ impl<'a> Parser<'a> {
     fn parse_fn(&mut self) -> Result<Stmt> {
         self.next(); // `fn` keyword
 
+        let is_extern = if self.at(&TokenKind::Lparen) {
+            self.next();
+            self.expect(&TokenKind::Keyword(Keyword::Extern))?;
+            self.expect(&TokenKind::Rparen)?;
+
+            true
+        } else {
+            false
+        };
+
         let name = self.expect_ident()?;
 
         let mut args = vec![];
@@ -274,16 +289,27 @@ impl<'a> Parser<'a> {
             Type::None
         };
 
-        self.expect(&TokenKind::Lbrace)?;
-        let body = self.parse()?;
-        self.expect(&TokenKind::Rbrace)?;
+        let body = if self.at(&TokenKind::Lbrace) {
+            self.next();
+            let body = self.parse()?;
+            self.expect(&TokenKind::Rbrace)?;
+
+            Some(body)
+        } else if is_extern {
+            self.expect(&TokenKind::Semicolon)?;
+
+            None
+        } else {
+            panic!("non-extern fns without body aren't allowed")
+        };
 
         Ok(Stmt {
             kind: StmtKind::FnDecl {
                 name,
-                body,
                 args,
+                body,
                 return_ty,
+                is_extern,
             },
         })
     }

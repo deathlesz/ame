@@ -139,6 +139,7 @@ pub enum Keyword {
     While,
     Fn,
     Return,
+    Extern,
 }
 
 impl std::str::FromStr for Keyword {
@@ -153,6 +154,7 @@ impl std::str::FromStr for Keyword {
             "while" => Ok(Keyword::While),
             "fn" => Ok(Keyword::Fn),
             "return" => Ok(Keyword::Return),
+            "extern" => Ok(Keyword::Extern),
             _ => Err(()),
         }
     }

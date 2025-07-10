@@ -3,7 +3,7 @@ use std::path::PathBuf;
 pub use inkwell::context::Context;
 use inkwell::{
     builder::Builder,
-    module::Module,
+    module::{Linkage, Module},
     targets::{Target, TargetMachine, TargetTriple},
     types::{BasicType, BasicTypeEnum},
     values::{BasicValue, BasicValueEnum, FunctionValue},
@@ -210,40 +210,42 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 StmtKind::FnDecl {
                     name, args, body, ..
                 } => {
-                    let arg_names = args.iter().map(|stmt| match &stmt.kind {
-                        StmtKind::VarDecl(VarDecl { name, .. }) => name,
-                        _ => {
-                            unreachable!("function arguments are always variable declarations")
+                    if let Some(body) = body {
+                        let arg_names = args.iter().map(|stmt| match &stmt.kind {
+                            StmtKind::VarDecl(VarDecl { name, .. }) => name,
+                            _ => {
+                                unreachable!("function arguments are always variable declarations")
+                            }
+                        });
+
+                        // will never panic because it was pregenerated earlier
+                        let func = self.module.get_function(name).unwrap();
+
+                        let prev_func = self.current_func;
+                        let prev_bb = self.builder.get_insert_block();
+                        self.current_func = Some(func);
+
+                        let bb = self.context.append_basic_block(func, name);
+                        self.builder.position_at_end(bb);
+
+                        self.locals.enter();
+                        for (arg, name) in func.get_params().into_iter().zip(arg_names) {
+                            let ptr = self.builder.build_alloca(arg.get_type(), name).unwrap();
+                            self.builder.build_store(ptr, arg).unwrap();
+
+                            self.locals.define(name, ptr.as_basic_value_enum());
                         }
-                    });
 
-                    // will never panic because it was pregenerated earlier
-                    let func = self.module.get_function(name).unwrap();
+                        self.locals.enter();
+                        self.generate_stmts(body);
 
-                    let prev_func = self.current_func;
-                    let prev_bb = self.builder.get_insert_block();
-                    self.current_func = Some(func);
+                        self.locals.exit();
+                        self.locals.exit();
 
-                    let bb = self.context.append_basic_block(func, name);
-                    self.builder.position_at_end(bb);
-
-                    self.locals.enter();
-                    for (arg, name) in func.get_params().into_iter().zip(arg_names) {
-                        let ptr = self.builder.build_alloca(arg.get_type(), name).unwrap();
-                        self.builder.build_store(ptr, arg).unwrap();
-
-                        self.locals.define(name, ptr.as_basic_value_enum());
-                    }
-
-                    self.locals.enter();
-                    self.generate_stmts(body);
-
-                    self.locals.exit();
-                    self.locals.exit();
-
-                    self.current_func = prev_func;
-                    if let Some(prev_bb) = prev_bb {
-                        self.builder.position_at_end(prev_bb);
+                        self.current_func = prev_func;
+                        if let Some(prev_bb) = prev_bb {
+                            self.builder.position_at_end(prev_bb);
+                        }
                     }
                 }
                 StmtKind::Return(expr) => {
@@ -270,6 +272,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 name,
                 args,
                 return_ty,
+                is_extern,
                 ..
             } = &stmt.kind
             {
@@ -305,7 +308,15 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         ret_ty.into_void_type().fn_type(&arg_types, false)
                     };
 
-                let func = self.module.add_function(name, fn_type, None);
+                let func = self.module.add_function(
+                    name,
+                    fn_type,
+                    Some(if *is_extern {
+                        Linkage::External
+                    } else {
+                        Linkage::Private
+                    }),
+                );
                 for (arg, name) in func.get_params().iter().zip(arg_names) {
                     arg.set_name(name);
                 }

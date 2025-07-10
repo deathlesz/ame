@@ -26,8 +26,9 @@ pub enum StmtKind {
     FnDecl {
         name: String,
         args: Vec<Stmt>,
-        body: Vec<Stmt>,
+        body: Option<Vec<Stmt>>,
         return_ty: Type,
+        is_extern: bool,
     },
     Return(Option<Expr>),
     ExprStmt(Expr),
