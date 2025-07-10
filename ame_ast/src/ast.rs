@@ -29,6 +29,7 @@ pub enum StmtKind {
         body: Option<Vec<Stmt>>,
         return_ty: Type,
         is_extern: bool,
+        is_variadic: bool,
     },
     Return(Option<Expr>),
     ExprStmt(Expr),

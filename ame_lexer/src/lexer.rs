@@ -214,7 +214,20 @@ impl<'a> Lexer<'a> {
             '[' => TokenKind::Lbracket,
             ']' => TokenKind::Rbracket,
 
-            '.' => TokenKind::Dot,
+            '.' => {
+                if self.peek() == '.' {
+                    self.bump();
+                    if self.peek() == '.' {
+                        self.bump();
+
+                        TokenKind::ThreeDot
+                    } else {
+                        TokenKind::TwoDot
+                    }
+                } else {
+                    TokenKind::Dot
+                }
+            }
             ',' => TokenKind::Comma,
             '#' => TokenKind::Pound,
 

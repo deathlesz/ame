@@ -185,6 +185,7 @@ impl<'a> Inferrer<'a> {
                 name,
                 args,
                 return_ty,
+                is_variadic,
                 ..
             } = &mut stmt.kind
             {
@@ -203,8 +204,14 @@ impl<'a> Inferrer<'a> {
                 }
                 self.env.exit();
 
-                self.env
-                    .define(name.clone(), Type::Fn(arg_tys, Box::new(return_ty.clone())));
+                self.env.define(
+                    name.clone(),
+                    Type::Fn {
+                        args: arg_tys,
+                        return_ty: Box::new(return_ty.clone()),
+                        is_variadic: *is_variadic,
+                    },
+                );
             }
         }
 
@@ -301,11 +308,21 @@ impl<'a> Inferrer<'a> {
             ExprKind::FnCall(name, args) => {
                 if let Some(ty) = self.env.get(&*name).cloned() {
                     match ty {
-                        Type::Fn(arg_tys, ret_ty) => {
-                            for (arg, arg_ty) in args.iter_mut().zip(arg_tys) {
+                        Type::Fn {
+                            args: arg_tys,
+                            return_ty: ret_ty,
+                            ..
+                        } => {
+                            // required to still infer types of variadic arguments, but not unify them
+                            for (arg, arg_ty) in args
+                                .iter_mut()
+                                .zip(arg_tys.iter().map(Some).chain(std::iter::repeat(None)))
+                            {
                                 self.infer_expr_type(arg)?;
 
-                                unify(&arg.ty, &arg_ty, self.tcx)?;
+                                if let Some(arg_ty) = arg_ty {
+                                    unify(&arg.ty, arg_ty, self.tcx)?;
+                                }
                             }
 
                             ret_ty.resolve(self.tcx)

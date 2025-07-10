@@ -56,6 +56,8 @@ pub enum TokenKind {
     Semicolon,
 
     Dot,
+    TwoDot,
+    ThreeDot,
     Comma,
     Pound,
 

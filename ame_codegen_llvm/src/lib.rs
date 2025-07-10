@@ -273,6 +273,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 args,
                 return_ty,
                 is_extern,
+                is_variadic,
                 ..
             } = &stmt.kind
             {
@@ -303,9 +304,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 let ret_ty = return_ty.as_llvm_type(self.context);
                 let fn_type =
                     if let Ok(ty) = std::convert::TryInto::<BasicTypeEnum>::try_into(ret_ty) {
-                        ty.fn_type(&arg_types, false)
+                        ty.fn_type(&arg_types, *is_variadic)
                     } else {
-                        ret_ty.into_void_type().fn_type(&arg_types, false)
+                        ret_ty.into_void_type().fn_type(&arg_types, *is_variadic)
                     };
 
                 let func = self.module.add_function(

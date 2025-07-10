@@ -11,7 +11,11 @@ pub enum Type {
     Float(FloatKind),
     Bool,
     String,
-    Fn(Vec<Type>, Box<Type>),
+    Fn {
+        args: Vec<Type>,
+        return_ty: Box<Type>,
+        is_variadic: bool,
+    },
     None,
     Other(String), // placeholder for more types later
 }

@@ -250,9 +250,17 @@ impl<'a> Parser<'a> {
         let name = self.expect_ident()?;
 
         let mut args = vec![];
+        let mut is_variadic = false;
         self.expect(&TokenKind::Lparen)?;
         if !self.at(&TokenKind::Rparen) {
             loop {
+                if is_extern && self.at(&TokenKind::ThreeDot) {
+                    self.next();
+                    is_variadic = true;
+
+                    break;
+                }
+
                 let name = self.expect_ident()?;
                 self.expect(&TokenKind::Colon)?;
                 let ty = self.expect_ident()?.into();
@@ -310,6 +318,7 @@ impl<'a> Parser<'a> {
                 body,
                 return_ty,
                 is_extern,
+                is_variadic,
             },
         })
     }
