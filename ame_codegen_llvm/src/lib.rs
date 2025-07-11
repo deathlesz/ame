@@ -10,9 +10,9 @@ use inkwell::{
     AddressSpace,
 };
 
-use ame_ast::{AssignOp, BinOp, Expr, ExprKind, Stmt, StmtKind, VarDecl};
 use ame_common::ScopeStack;
 use ame_lexer::LiteralKind;
+use ame_tast::{AssignOp, BinOp, TypedExpr, TypedExprKind, TypedStmt, TypedStmtKind};
 use ame_types::{Type, TypeCtx};
 
 mod options;
@@ -22,10 +22,11 @@ use crate::ty::{AsFloatPredicate, AsIntPredicate, AsLLVMType};
 pub use options::*;
 
 pub struct CodeGen<'a, 'ctx> {
-    ast: &'a [Stmt],
+    ast: &'a [TypedStmt],
     tcx: TypeCtx,
 
     locals: ScopeStack<&'a String, BasicValueEnum<'ctx>>,
+    fns: ScopeStack<&'a String, FunctionValue<'ctx>>,
     strings: HashMap<String, GlobalValue<'ctx>>,
 
     context: &'ctx Context,
@@ -38,7 +39,7 @@ pub struct CodeGen<'a, 'ctx> {
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     #[inline]
     pub fn new(
-        ast: &'a [Stmt],
+        ast: &'a [TypedStmt],
         tcx: TypeCtx,
 
         context: &'ctx Context,
@@ -50,6 +51,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             tcx,
 
             locals: ScopeStack::new(),
+            fns: ScopeStack::new(),
             strings: HashMap::new(),
 
             context,
@@ -134,17 +136,17 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    fn generate_stmts(&mut self, stmts: &'a [Stmt]) -> bool {
+    fn generate_stmts(&mut self, stmts: &'a [TypedStmt]) -> bool {
         self.generate_fns(stmts);
 
         let mut returned = false;
         for stmt in stmts {
             match &stmt.kind {
-                StmtKind::VarDecl(VarDecl {
+                TypedStmtKind::VarDecl {
                     name,
                     ty,
                     init_expr,
-                }) => {
+                } => {
                     if self.current_func.is_none() {
                         panic!("no current function")
                     }
@@ -153,7 +155,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         .builder
                         .build_alloca(
                             std::convert::TryInto::<BasicTypeEnum>::try_into(
-                                ty.as_llvm_type(self.context),
+                                ty.resolve(&self.tcx).as_llvm_type(self.context),
                             )
                             .unwrap(),
                             name,
@@ -168,7 +170,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
                     self.locals.define(name, var.as_basic_value_enum());
                 }
-                StmtKind::If {
+                TypedStmtKind::If {
                     branches,
                     else_body,
                 } => {
@@ -178,7 +180,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         panic!("no current function")
                     }
                 }
-                StmtKind::While { cond, body } => {
+                TypedStmtKind::While { cond, body } => {
                     if let Some(func) = self.current_func {
                         let cond_generated = self.generate_nonvoid_expr(cond);
                         let cmp = cond_generated.into_int_value();
@@ -193,7 +195,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         self.builder.position_at_end(do_block);
 
                         self.locals.enter();
+                        self.fns.enter();
                         let returned = self.generate_stmts(body);
+                        self.fns.exit();
                         self.locals.exit();
 
                         if !returned {
@@ -210,19 +214,19 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         panic!("no current function")
                     }
                 }
-                StmtKind::FnDecl {
+                TypedStmtKind::FnDecl {
                     name, args, body, ..
                 } => {
                     if let Some(body) = body {
                         let arg_names = args.iter().map(|stmt| match &stmt.kind {
-                            StmtKind::VarDecl(VarDecl { name, .. }) => name,
+                            TypedStmtKind::VarDecl { name, .. } => name,
                             _ => {
                                 unreachable!("function arguments are always variable declarations")
                             }
                         });
 
                         // will never panic because it was pregenerated earlier
-                        let func = self.module.get_function(name).unwrap();
+                        let func = *self.fns.get(name).unwrap();
 
                         let prev_func = self.current_func;
                         let prev_bb = self.builder.get_insert_block();
@@ -232,6 +236,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         self.builder.position_at_end(bb);
 
                         self.locals.enter();
+                        self.fns.enter();
                         for (arg, name) in func.get_params().into_iter().zip(arg_names) {
                             let ptr = self.builder.build_alloca(arg.get_type(), name).unwrap();
                             self.builder.build_store(ptr, arg).unwrap();
@@ -240,9 +245,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         }
 
                         self.locals.enter();
+                        self.fns.enter();
                         self.generate_stmts(body);
 
+                        self.fns.exit();
                         self.locals.exit();
+                        self.fns.exit();
                         self.locals.exit();
 
                         self.current_func = prev_func;
@@ -251,7 +259,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         }
                     }
                 }
-                StmtKind::Return(expr) => {
+                TypedStmtKind::Return(expr) => {
                     let value = expr.as_ref().and_then(|expr| self.generate_expr(expr));
 
                     self.builder
@@ -260,7 +268,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
                     returned = true;
                 }
-                StmtKind::ExprStmt(expr) => {
+                TypedStmtKind::ExprStmt(expr) => {
                     _ = self.generate_expr(expr); // we don't care if it's void
                 }
             }
@@ -269,9 +277,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         returned
     }
 
-    fn generate_fns(&mut self, stmts: &'a [Stmt]) {
+    fn generate_fns(&mut self, stmts: &'a [TypedStmt]) {
         for stmt in stmts {
-            if let StmtKind::FnDecl {
+            if let TypedStmtKind::FnDecl {
                 name,
                 args,
                 return_ty,
@@ -280,10 +288,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 ..
             } = &stmt.kind
             {
-                if self.module.get_function(name).is_some() {
-                    continue;
-                }
-
                 // NOTE: this monstrosity is required because .unzip() requires Default
                 // which is not implemented for BasicMetadataTypeEnum
                 let (arg_names, arg_types) = args.iter().fold(
@@ -292,9 +296,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         Vec::with_capacity(args.len()),
                     ),
                     |(mut names, mut types), stmt| match &stmt.kind {
-                        StmtKind::VarDecl(VarDecl { name, ty, .. }) => {
+                        TypedStmtKind::VarDecl { name, ty, .. } => {
                             names.push(name);
-                            types.push(ty.as_llvm_type(self.context).try_into().unwrap());
+                            types.push(
+                                ty.resolve(&self.tcx)
+                                    .as_llvm_type(self.context)
+                                    .try_into()
+                                    .unwrap(),
+                            );
 
                             (names, types)
                         }
@@ -304,7 +313,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     },
                 );
 
-                let ret_ty = return_ty.as_llvm_type(self.context);
+                let ret_ty = return_ty.resolve(&self.tcx).as_llvm_type(self.context);
                 let fn_type =
                     if let Ok(ty) = std::convert::TryInto::<BasicTypeEnum>::try_into(ret_ty) {
                         ty.fn_type(&arg_types, *is_variadic)
@@ -321,9 +330,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         Linkage::Private
                     }),
                 );
+
                 for (arg, name) in func.get_params().iter().zip(arg_names) {
                     arg.set_name(name);
                 }
+
+                self.fns.define(name, func);
             }
         }
     }
@@ -331,8 +343,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     fn generate_if(
         &mut self,
         func: FunctionValue<'ctx>,
-        branches: &'a [(Expr, Vec<Stmt>)],
-        else_body: &'a Option<Vec<Stmt>>,
+        branches: &'a [(TypedExpr, Vec<TypedStmt>)],
+        else_body: &'a Option<Vec<TypedStmt>>,
     ) {
         let Some(((cond, body), rest)) = branches.split_last() else {
             return;
@@ -354,7 +366,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             self.builder.position_at_end(then_block);
 
             self.locals.enter();
+            self.fns.enter();
             let returned = self.generate_stmts(body);
+            self.fns.exit();
             self.locals.exit();
 
             if !returned {
@@ -383,7 +397,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         self.builder.position_at_end(then_block);
 
         self.locals.enter();
+        self.fns.enter();
         let returned = self.generate_stmts(body);
+        self.fns.exit();
         self.locals.exit();
 
         if !returned {
@@ -396,7 +412,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             self.builder.position_at_end(else_block.unwrap());
 
             self.locals.enter();
+            self.fns.enter();
             let returned = self.generate_stmts(else_body);
+            self.fns.exit();
             self.locals.exit();
 
             if !returned {
@@ -409,12 +427,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         self.builder.position_at_end(last_ifcont_block);
     }
 
-    fn generate_expr(&mut self, expr: &Expr) -> Option<BasicValueEnum<'ctx>> {
+    fn generate_expr(&mut self, expr: &TypedExpr) -> Option<BasicValueEnum<'ctx>> {
         let ty = expr.ty.resolve(&self.tcx);
         let llvm_ty = ty.as_llvm_type(self.context);
 
         match &expr.kind {
-            ExprKind::Literal(kind) => match kind {
+            TypedExprKind::Literal(kind) => match kind {
                 LiteralKind::Int {
                     base,
                     empty: _,
@@ -470,7 +488,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     }
                 }),
             },
-            ExprKind::Variable(name) => Some(
+            TypedExprKind::Variable(name) => Some(
                 self.builder
                     .build_load(
                         std::convert::TryInto::<BasicTypeEnum>::try_into(llvm_ty).unwrap(),
@@ -479,7 +497,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     )
                     .unwrap(),
             ),
-            ExprKind::Binary(op, lhs, rhs) => {
+            TypedExprKind::Binary(op, lhs, rhs) => {
                 let (l, r) = (
                     self.generate_nonvoid_expr(lhs),
                     self.generate_nonvoid_expr(rhs),
@@ -494,9 +512,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     rhs.ty.resolve(&self.tcx),
                 ))
             }
-            ExprKind::Assign { op, lhs, rhs } => {
+            TypedExprKind::Assign(op, lhs, rhs) => {
                 let ptr = match &lhs.kind {
-                    ExprKind::Variable(name) => *self.locals.get(name).unwrap(),
+                    TypedExprKind::Variable(name) => *self.locals.get(name).unwrap(),
                     _ => unreachable!("assignment lhs can only be variable"),
                 }
                 .into_pointer_value();
@@ -537,8 +555,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     }
                 }
             }
-            ExprKind::FnCall(name, args) => {
-                let func = self.module.get_function(name).expect("no func :(");
+            TypedExprKind::FnCall(name, args) => {
+                let func = *self.fns.get(name).expect("no func :(");
 
                 let args = args
                     .iter()
@@ -554,7 +572,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    fn generate_nonvoid_expr(&mut self, expr: &Expr) -> BasicValueEnum<'ctx> {
+    fn generate_nonvoid_expr(&mut self, expr: &TypedExpr) -> BasicValueEnum<'ctx> {
         self.generate_expr(expr)
             .unwrap_or_else(|| panic!("void expr cannot be used"))
     }

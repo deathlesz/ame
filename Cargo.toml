@@ -7,7 +7,10 @@ members = [
 
     "ame_lexer",
     "ame_parser",
+    "ame_ast",
+
     "ame_types",
+    "ame_tast",
 
     "ame_codegen_llvm",
 

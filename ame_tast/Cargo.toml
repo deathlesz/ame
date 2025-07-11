@@ -1,20 +1,14 @@
 [package]
-name = "ame_cli"
+name = "ame_tast"
 version = "0.1.0"
 authors.workspace = true
 edition.workspace = true
 license.workspace = true
 keywords.workspace = true
 readme.workspace = true
-default-run = "ame_cli"
 
 [dependencies]
-miette = { version = "7", features = ["fancy"] }
-clap = { version = "4.5", features = ["derive"] }
-
+ame_common = { path = "../ame_common" }
 ame_lexer = { path = "../ame_lexer" }
 ame_ast = { path = "../ame_ast" }
-ame_tast = { path = "../ame_tast" }
-ame_parser = { path = "../ame_parser" }
-ame_codegen_llvm = { path = "../ame_codegen_llvm" }
 ame_types = { path = "../ame_types" }

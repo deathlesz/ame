@@ -1,11 +1,9 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, convert::Infallible};
 
 type Result<T> = std::result::Result<T, TypeError>;
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
-    #[default]
-    Unknown,
     Var(TypeId, Constraint),
     Int(IntKind),
     Float(FloatKind),
@@ -51,7 +49,7 @@ impl Type {
 }
 
 impl std::str::FromStr for Type {
-    type Err = ();
+    type Err = Infallible;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         if let Ok(kind) = s.parse::<IntKind>() {
@@ -70,6 +68,12 @@ impl std::str::FromStr for Type {
 
 impl From<String> for Type {
     fn from(s: String) -> Self {
+        s.parse().unwrap()
+    }
+}
+
+impl From<&String> for Type {
+    fn from(s: &String) -> Self {
         s.parse().unwrap()
     }
 }
@@ -179,7 +183,7 @@ impl Default for TypeCtx {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub enum IntKind {
     Int8,
     Int16,
@@ -221,7 +225,7 @@ impl std::str::FromStr for IntKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub enum FloatKind {
     Float32,
     #[default]

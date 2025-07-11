@@ -107,7 +107,7 @@ impl TokenKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum LiteralKind {
     Int {
         base: Base,
@@ -125,15 +125,16 @@ pub enum LiteralKind {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Base {
     Binary = 2,
     Octal = 8,
+    #[default]
     Decimal = 10,
     Hexadecimal = 16,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Keyword {
     Let,
     If,

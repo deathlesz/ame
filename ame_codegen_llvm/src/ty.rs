@@ -1,4 +1,4 @@
-use ame_ast::BinOp;
+use ame_tast::BinOp;
 use ame_types::{FloatKind, IntKind, Type};
 use inkwell::{context::Context, types::AnyTypeEnum, AddressSpace, FloatPredicate, IntPredicate};
 

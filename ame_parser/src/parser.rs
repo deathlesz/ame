@@ -1,6 +1,5 @@
-use ame_ast::{Expr, ExprKind, Stmt, StmtKind, VarDecl};
+use ame_ast::{Expr, ExprKind, Stmt, StmtKind};
 use ame_lexer::{Keyword, Span, Token, TokenKind};
-use ame_types::Type;
 
 type Result<T> = std::result::Result<T, ParseError>;
 
@@ -172,11 +171,11 @@ impl<'a> Parser<'a> {
             };
 
             decls.push(Stmt {
-                kind: StmtKind::VarDecl(VarDecl {
+                kind: StmtKind::VarDecl {
                     name,
-                    ty: ty.map(|ty| ty.into()).unwrap_or(Type::Unknown),
+                    ty,
                     init_expr,
-                }),
+                },
             });
 
             if self.at(&TokenKind::Semicolon) {
@@ -275,11 +274,11 @@ impl<'a> Parser<'a> {
                 // NOTE: maybe this is genius, maybe it's fucking awful
                 // we'll see
                 args.push(Stmt {
-                    kind: StmtKind::VarDecl(VarDecl {
+                    kind: StmtKind::VarDecl {
                         name,
                         ty,
                         init_expr,
-                    }),
+                    },
                 });
 
                 if self.at(&TokenKind::Rparen) {
@@ -292,9 +291,9 @@ impl<'a> Parser<'a> {
         self.next(); // `)`
 
         let return_ty = if let Ok(ty) = self.expect_ident() {
-            ty.into()
+            Some(ty)
         } else {
-            Type::None
+            None
         };
 
         let body = if self.at(&TokenKind::Lbrace) {
@@ -354,12 +353,11 @@ impl<'a> Parser<'a> {
                     let rhs = self.parse_expr(r_bp)?;
 
                     lhs = Expr {
-                        kind: ExprKind::Assign {
-                            op: op.try_into().unwrap(),
-                            lhs: Box::new(lhs),
-                            rhs: Box::new(rhs),
-                        },
-                        ty: Type::default(),
+                        kind: ExprKind::Assign(
+                            op.try_into().unwrap(),
+                            Box::new(lhs),
+                            Box::new(rhs),
+                        ),
                     }
                 }
                 kind if kind.is_binary() => {
@@ -371,7 +369,6 @@ impl<'a> Parser<'a> {
                             Box::new(lhs),
                             Box::new(rhs),
                         ),
-                        ty: Type::default(),
                     };
                 }
                 t => panic!("unhandled token in expr: {t:?}"),
@@ -387,7 +384,6 @@ impl<'a> Parser<'a> {
         match &token.kind {
             TokenKind::Literal { kind } => Ok(Expr {
                 kind: ExprKind::Literal(kind.clone()),
-                ty: Type::default(),
             }),
             TokenKind::Lparen => {
                 let expr = self.parse_expr(0);
@@ -411,13 +407,11 @@ impl<'a> Parser<'a> {
 
                     return Ok(Expr {
                         kind: ExprKind::FnCall(name.clone(), args),
-                        ty: Type::default(),
                     });
                 }
 
                 Ok(Expr {
                     kind: ExprKind::Variable(name.clone()),
-                    ty: Type::default(),
                 })
             }
             got => Err(ParseError::Unexpected {

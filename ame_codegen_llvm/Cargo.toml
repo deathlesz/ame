@@ -8,12 +8,11 @@ keywords.workspace = true
 readme.workspace = true
 
 [dependencies]
-thiserror = "2"
 inkwell = { version = "0.6", features = ["llvm18-1"] }
 
 ame_common = { path = "../ame_common" }
 ame_lexer = { path = "../ame_lexer" }
-ame_ast = { path = "../ame_ast" }
+ame_tast = { path = "../ame_tast" }
 ame_types = { path = "../ame_types" }
 
 [features]

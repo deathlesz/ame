@@ -10,4 +10,3 @@ readme.workspace = true
 [dependencies]
 ame_lexer = { path = "../ame_lexer" }
 ame_ast = { path = "../ame_ast" }
-ame_types = { path = "../ame_types" }
