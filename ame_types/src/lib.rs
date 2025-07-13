@@ -14,6 +14,7 @@ pub enum Type {
         return_ty: Box<Type>,
         is_variadic: bool,
     },
+    Ref(Box<Type>),
     None,
     Other(String), // placeholder for more types later
 }
@@ -58,8 +59,10 @@ impl std::str::FromStr for Type {
             Ok(Self::Float(kind))
         } else if s == "string" {
             Ok(Self::String)
-        } else if s == "false" || s == "true" {
+        } else if s == "bool" {
             Ok(Self::Bool)
+        } else if s.starts_with('&') {
+            Ok(Self::Ref(Box::new(s[1..].parse()?)))
         } else {
             Ok(Self::Other(s.into()))
         }
@@ -106,6 +109,7 @@ pub fn unify(t1: &Type, t2: &Type, ctx: &mut TypeCtx) -> Result<()> {
                 Ok(())
             }
         }
+        (Type::Ref(ty1), Type::Ref(ty2)) => unify(ty1, ty2, ctx),
         (Type::None, Type::None) => Ok(()),
         (Type::Other(s1), Type::Other(s2)) if s1 == s2 => Ok(()),
 
@@ -123,10 +127,12 @@ fn occurs_check(id: &TypeId, ty: &Type, ctx: &TypeCtx) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TypeId(usize);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Constraint {
+    #[default]
     None,
     Integer,
+    SignedInteger,
     Float,
 }
 
@@ -134,8 +140,9 @@ impl Constraint {
     fn matches(&self, ty: &Type) -> bool {
         match self {
             Self::None => true,
-            Self::Integer => matches!(ty, &Type::Int(_) | &Type::Var(_, Constraint::Integer)),
-            Self::Float => matches!(ty, &Type::Float(_) | &Type::Var(_, Constraint::Float)),
+            Self::Integer => matches!(ty, Type::Int(_) | Type::Var(_, Constraint::Integer)),
+            Self::SignedInteger => matches!(ty, Type::Int(kind) if !kind.unsigned()),
+            Self::Float => matches!(ty, Type::Float(_) | Type::Var(_, Constraint::Float)),
         }
     }
 }

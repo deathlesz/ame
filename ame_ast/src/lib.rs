@@ -41,57 +41,10 @@ pub enum StmtKind {
 pub enum ExprKind {
     Literal(LiteralKind),
     Variable(String),
+    Unary(UnaryOp, Box<Expr>),
     Binary(BinOp, Box<Expr>, Box<Expr>),
     Assign(AssignOp, Box<Expr>, Box<Expr>),
     FnCall(String, Vec<Expr>),
-}
-
-// TODO: somehow don't repeat here?
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum AssignOp {
-    Assign,
-    Add,
-    Sub,
-    Mul,
-    Div,
-    Rem,
-    BitXor,
-    BitAnd,
-    BitOr,
-    Shl,
-    Shr,
-}
-
-impl TryFrom<&Token> for AssignOp {
-    type Error = ();
-
-    #[inline]
-    fn try_from(token: &Token) -> Result<Self, Self::Error> {
-        match token.kind {
-            TokenKind::Assign => Ok(AssignOp::Assign),
-            TokenKind::PlusAssign => Ok(AssignOp::Add),
-            TokenKind::MinusAssign => Ok(AssignOp::Sub),
-            TokenKind::AsteriskAssign => Ok(AssignOp::Mul),
-            TokenKind::SlashAssign => Ok(AssignOp::Div),
-            TokenKind::PercentAssign => Ok(AssignOp::Rem),
-            TokenKind::PipeAssign => Ok(AssignOp::BitOr),
-            TokenKind::AmpAssign => Ok(AssignOp::BitAnd),
-            TokenKind::CaretAssign => Ok(AssignOp::BitXor),
-            TokenKind::ShlAssign => Ok(AssignOp::Shl),
-            TokenKind::ShrAssign => Ok(AssignOp::Shr),
-
-            ref t => panic!("invalid token -> assign op: {t:?}"),
-        }
-    }
-}
-
-impl TryFrom<Token> for AssignOp {
-    type Error = ();
-
-    #[inline]
-    fn try_from(token: Token) -> Result<Self, Self::Error> {
-        (&token).try_into()
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -155,6 +108,54 @@ impl TryFrom<Token> for BinOp {
     }
 }
 
+// TODO: somehow don't repeat here?
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AssignOp {
+    Assign,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Rem,
+    BitXor,
+    BitAnd,
+    BitOr,
+    Shl,
+    Shr,
+}
+
+impl TryFrom<&Token> for AssignOp {
+    type Error = ();
+
+    #[inline]
+    fn try_from(token: &Token) -> Result<Self, Self::Error> {
+        match token.kind {
+            TokenKind::Assign => Ok(AssignOp::Assign),
+            TokenKind::PlusAssign => Ok(AssignOp::Add),
+            TokenKind::MinusAssign => Ok(AssignOp::Sub),
+            TokenKind::AsteriskAssign => Ok(AssignOp::Mul),
+            TokenKind::SlashAssign => Ok(AssignOp::Div),
+            TokenKind::PercentAssign => Ok(AssignOp::Rem),
+            TokenKind::PipeAssign => Ok(AssignOp::BitOr),
+            TokenKind::AmpAssign => Ok(AssignOp::BitAnd),
+            TokenKind::CaretAssign => Ok(AssignOp::BitXor),
+            TokenKind::ShlAssign => Ok(AssignOp::Shl),
+            TokenKind::ShrAssign => Ok(AssignOp::Shr),
+
+            ref t => panic!("invalid token -> assign op: {t:?}"),
+        }
+    }
+}
+
+impl TryFrom<Token> for AssignOp {
+    type Error = ();
+
+    #[inline]
+    fn try_from(token: Token) -> Result<Self, Self::Error> {
+        (&token).try_into()
+    }
+}
+
 impl TryFrom<&AssignOp> for BinOp {
     type Error = ();
 
@@ -183,5 +184,38 @@ impl TryFrom<AssignOp> for BinOp {
     #[inline]
     fn try_from(op: AssignOp) -> Result<Self, Self::Error> {
         (&op).try_into()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum UnaryOp {
+    Neg,
+    Not,
+    Ref,
+    Deref,
+}
+
+impl TryFrom<&Token> for UnaryOp {
+    type Error = ();
+
+    #[inline]
+    fn try_from(token: &Token) -> Result<Self, Self::Error> {
+        match token.kind {
+            TokenKind::Minus => Ok(UnaryOp::Neg),
+            TokenKind::Bang => Ok(UnaryOp::Not),
+            TokenKind::Amp => Ok(UnaryOp::Ref),
+            TokenKind::Asterisk => Ok(UnaryOp::Deref),
+
+            ref t => todo!("invalid token -> unary op: {t:?}"),
+        }
+    }
+}
+
+impl TryFrom<Token> for UnaryOp {
+    type Error = ();
+
+    #[inline]
+    fn try_from(token: Token) -> Result<Self, Self::Error> {
+        (&token).try_into()
     }
 }

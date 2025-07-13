@@ -2,7 +2,7 @@ use ame_lexer::LiteralKind;
 use ame_types::Type;
 
 mod inferrer;
-pub use ame_ast::{AssignOp, BinOp};
+pub use ame_ast::{AssignOp, BinOp, UnaryOp};
 pub use inferrer::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -15,6 +15,7 @@ pub struct TypedExpr {
 pub enum TypedExprKind {
     Literal(LiteralKind),
     Variable(String),
+    Unary(UnaryOp, Box<TypedExpr>),
     Binary(BinOp, Box<TypedExpr>, Box<TypedExpr>),
     Assign(AssignOp, Box<TypedExpr>, Box<TypedExpr>),
     FnCall(String, Vec<TypedExpr>),

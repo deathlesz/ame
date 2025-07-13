@@ -12,8 +12,8 @@ use inkwell::{
 
 use ame_common::ScopeStack;
 use ame_lexer::LiteralKind;
-use ame_tast::{AssignOp, BinOp, TypedExpr, TypedExprKind, TypedStmt, TypedStmtKind};
-use ame_types::{Type, TypeCtx};
+use ame_tast::{AssignOp, BinOp, TypedExpr, TypedExprKind, TypedStmt, TypedStmtKind, UnaryOp};
+use ame_types::{Constraint, Type, TypeCtx};
 
 mod options;
 mod ty;
@@ -497,6 +497,52 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     )
                     .unwrap(),
             ),
+            TypedExprKind::Unary(op, val) => {
+                let val = self.generate_nonvoid_expr(val);
+
+                Some(match op {
+                    UnaryOp::Neg => match ty {
+                        Type::Int(_)
+                        | Type::Var(_, Constraint::Integer | Constraint::SignedInteger) => self
+                            .builder
+                            .build_int_neg(val.into_int_value(), "neg")
+                            .unwrap()
+                            .into(),
+                        Type::Float(_) | Type::Var(_, Constraint::Float) => self
+                            .builder
+                            .build_float_neg(val.into_float_value(), "negf")
+                            .unwrap()
+                            .into(),
+                        _ => unreachable!("type checking should rule out other types"),
+                    },
+                    UnaryOp::Not => self
+                        .builder
+                        .build_not(val.into_int_value(), "not")
+                        .unwrap()
+                        .into(),
+                    UnaryOp::Ref => {
+                        let ptr = self
+                            .builder
+                            .build_alloca(
+                                TryInto::<BasicTypeEnum>::try_into(llvm_ty).unwrap(),
+                                "alloc_ref",
+                            )
+                            .unwrap();
+
+                        self.builder.build_store(ptr, val).unwrap();
+
+                        ptr.into()
+                    }
+                    UnaryOp::Deref => self
+                        .builder
+                        .build_load(
+                            TryInto::<BasicTypeEnum>::try_into(llvm_ty).unwrap(),
+                            val.into_pointer_value(),
+                            "deref",
+                        )
+                        .unwrap(),
+                })
+            }
             TypedExprKind::Binary(op, lhs, rhs) => {
                 let (l, r) = (
                     self.generate_nonvoid_expr(lhs),

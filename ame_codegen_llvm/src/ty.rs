@@ -1,5 +1,5 @@
 use ame_tast::BinOp;
-use ame_types::{FloatKind, IntKind, Type};
+use ame_types::{Constraint, FloatKind, IntKind, Type};
 use inkwell::{context::Context, types::AnyTypeEnum, AddressSpace, FloatPredicate, IntPredicate};
 
 pub trait AsLLVMType<'ctx> {
@@ -25,9 +25,10 @@ impl<'ctx> AsLLVMType<'ctx> for Type {
                 FloatKind::Float64 => ctx.f64_type().into(),
             },
             Self::Bool => ctx.bool_type().into(),
-            Self::Var(_, ame_types::Constraint::Integer) => ctx.i32_type().into(),
-            Self::Var(_, ame_types::Constraint::Float) => ctx.f64_type().into(),
+            Self::Var(_, Constraint::Integer | Constraint::SignedInteger) => ctx.i32_type().into(),
+            Self::Var(_, Constraint::Float) => ctx.f64_type().into(),
             Self::String => ctx.ptr_type(AddressSpace::default()).into(), // temporary for now
+            Self::Ref(_) => ctx.ptr_type(AddressSpace::default()).into(),
             Self::None => ctx.void_type().into(),
 
             other => panic!("cannot lower {other:?} to llvm type"),

@@ -1,7 +1,7 @@
-use ame_ast::{AssignOp, BinOp, Expr, ExprKind, Stmt, StmtKind};
+use ame_ast::{AssignOp, BinOp, Expr, ExprKind, Stmt, StmtKind, UnaryOp};
 use ame_common::ScopeStack;
 use ame_lexer::LiteralKind;
-use ame_types::{unify, Type, TypeCtx, TypeError};
+use ame_types::{unify, Constraint, Type, TypeCtx, TypeError};
 
 use crate::{TypedExpr, TypedExprKind, TypedStmt, TypedStmtKind};
 
@@ -233,6 +233,37 @@ impl<'a> Inferrer<'a> {
                 } else {
                     panic!("undefined variable")
                 }
+            }
+            ExprKind::Unary(op, val) => {
+                let typed_val = self.infer_expr(val)?;
+
+                let result_ty = match op {
+                    UnaryOp::Neg => match &typed_val.ty {
+                        Type::Int(kind) if !kind.unsigned() => typed_val.ty.clone(),
+                        Type::Var(_, Constraint::SignedInteger) => typed_val.ty.clone(),
+                        Type::Var(tid, Constraint::Integer) => {
+                            Type::Var(tid.clone(), Constraint::SignedInteger)
+                        }
+                        Type::Float(_) => typed_val.ty.clone(),
+                        Type::Var(_, Constraint::Float) => typed_val.ty.clone(),
+                        ty => panic!("cannot negate {ty:?}"),
+                    },
+                    UnaryOp::Not => {
+                        match &typed_val.ty {
+                            Type::Bool => {}
+                            _ => panic!("cannot not"),
+                        }
+
+                        Type::Bool
+                    }
+                    UnaryOp::Ref => Type::Ref(Box::new(typed_val.ty.clone())),
+                    UnaryOp::Deref => match &typed_val.ty {
+                        Type::Ref(ty) => *ty.clone(),
+                        _ => panic!("cannot deref"),
+                    },
+                };
+
+                (TypedExprKind::Unary(*op, Box::new(typed_val)), result_ty)
             }
             ExprKind::Binary(op, lhs, rhs) => {
                 let typed_lhs = self.infer_expr(lhs)?;

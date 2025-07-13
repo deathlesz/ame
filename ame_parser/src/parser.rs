@@ -1,4 +1,4 @@
-use ame_ast::{Expr, ExprKind, Stmt, StmtKind};
+use ame_ast::{Expr, ExprKind, Stmt, StmtKind, UnaryOp};
 use ame_lexer::{Keyword, Span, Token, TokenKind};
 
 type Result<T> = std::result::Result<T, ParseError>;
@@ -67,20 +67,68 @@ impl<'a> Parser<'a> {
     }
 
     fn expect_ident(&mut self) -> Result<String> {
-        let peek = self.peek();
+        let peek = self.peek().clone();
 
-        match peek.kind.clone() {
+        match peek.kind {
             TokenKind::Ident(name) => {
                 self.next();
 
                 Ok(name)
             }
             _ => Err(ParseError::Unexpected {
-                got: peek.kind.clone(),
+                got: peek.kind,
                 expected: "ident".into(),
                 span: peek.span,
             }),
         }
+    }
+
+    fn try_parse_ty(&mut self) -> Result<Option<String>> {
+        let is_ref = if self.at(&TokenKind::Amp) {
+            self.next();
+
+            true
+        } else {
+            false
+        };
+
+        if !matches!(self.peek().kind, TokenKind::Ident(_)) {
+            if is_ref {
+                let token = self.peek().clone();
+
+                return Err(ParseError::Unexpected {
+                    got: TokenKind::Amp,
+                    expected: "a type".into(),
+                    span: token.span,
+                });
+            } else {
+                return Ok(None);
+            }
+        }
+
+        let mut ident = self.expect_ident()?;
+        if is_ref {
+            ident.insert(0, '&');
+        }
+
+        Ok(Some(ident))
+    }
+
+    fn expect_ty(&mut self) -> Result<String> {
+        let is_ref = if self.at(&TokenKind::Amp) {
+            self.next();
+
+            true
+        } else {
+            false
+        };
+
+        let mut ident = self.expect_ident()?;
+        if is_ref {
+            ident.insert(0, '&');
+        }
+
+        Ok(ident)
     }
 
     pub fn parse(&mut self) -> Result<Vec<Stmt>> {
@@ -158,7 +206,7 @@ impl<'a> Parser<'a> {
         loop {
             let name = self.expect_ident()?;
             let ty = if self.expect(&TokenKind::Colon).is_ok() {
-                Some(self.expect_ident()?)
+                Some(self.expect_ty()?)
             } else {
                 None
             };
@@ -262,7 +310,7 @@ impl<'a> Parser<'a> {
 
                 let name = self.expect_ident()?;
                 self.expect(&TokenKind::Colon)?;
-                let ty = self.expect_ident()?.into();
+                let ty = self.expect_ty()?;
 
                 let with_init = self.expect(&TokenKind::Assign).is_ok();
                 let init_expr = if with_init {
@@ -276,7 +324,7 @@ impl<'a> Parser<'a> {
                 args.push(Stmt {
                     kind: StmtKind::VarDecl {
                         name,
-                        ty,
+                        ty: Some(ty),
                         init_expr,
                     },
                 });
@@ -290,11 +338,8 @@ impl<'a> Parser<'a> {
         }
         self.next(); // `)`
 
-        let return_ty = if let Ok(ty) = self.expect_ident() {
-            Some(ty)
-        } else {
-            None
-        };
+        // will break for, e.g. fn add(a: int32, b: int32) & { ... }
+        let return_ty = self.try_parse_ty()?;
 
         let body = if self.at(&TokenKind::Lbrace) {
             self.next();
@@ -412,6 +457,13 @@ impl<'a> Parser<'a> {
 
                 Ok(Expr {
                     kind: ExprKind::Variable(name.clone()),
+                })
+            }
+            kind if kind.is_unary() => {
+                let expr = self.parse_atom()?;
+
+                Ok(Expr {
+                    kind: ExprKind::Unary(token.try_into().unwrap(), Box::new(expr)),
                 })
             }
             got => Err(ParseError::Unexpected {

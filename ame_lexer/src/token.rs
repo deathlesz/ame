@@ -71,6 +71,13 @@ pub enum TokenKind {
 }
 
 impl TokenKind {
+    pub fn is_unary(&self) -> bool {
+        matches!(
+            self,
+            TokenKind::Minus | TokenKind::Bang | TokenKind::Amp | TokenKind::Asterisk
+        )
+    }
+
     pub fn is_binary(&self) -> bool {
         matches!(
             self,
