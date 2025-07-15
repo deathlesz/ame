@@ -60,6 +60,7 @@ pub enum ExprKind {
     Binary(BinOp, Box<Expr>, Box<Expr>),
     Assign(AssignOp, Box<Expr>, Box<Expr>),
     FnCall(String, Vec<Expr>),
+    Cast(String, Box<Expr>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

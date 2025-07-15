@@ -685,6 +685,158 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     .try_as_basic_value()
                     .left()
             }
+            TypedExprKind::Cast(ty, expr) => {
+                let generated_expr = self.generate_nonvoid_expr(expr);
+                let llvm_ty =
+                    std::convert::TryInto::<BasicTypeEnum>::try_into(ty.as_llvm_type(self.context))
+                        .unwrap();
+
+                Some(match (&expr.ty, ty) {
+                    (Type::Int(src), Type::Int(dest)) => {
+                        if src.width() < dest.width() {
+                            if src.unsigned() {
+                                self.builder
+                                    .build_int_z_extend(
+                                        generated_expr.into_int_value(),
+                                        llvm_ty.into_int_type(),
+                                        "upcast",
+                                    )
+                                    .unwrap()
+                                    .into()
+                            } else {
+                                self.builder
+                                    .build_int_s_extend(
+                                        generated_expr.into_int_value(),
+                                        llvm_ty.into_int_type(),
+                                        "upcast",
+                                    )
+                                    .unwrap()
+                                    .into()
+                            }
+                        } else if src.width() > dest.width() {
+                            self.builder
+                                .build_int_truncate(
+                                    generated_expr.into_int_value(),
+                                    llvm_ty.into_int_type(),
+                                    "downcast",
+                                )
+                                .unwrap()
+                                .into()
+                        } else {
+                            generated_expr
+                        }
+                    }
+                    (Type::Float(src), Type::Float(dest)) => {
+                        if src.width() < dest.width() {
+                            self.builder
+                                .build_float_ext(
+                                    generated_expr.into_float_value(),
+                                    llvm_ty.into_float_type(),
+                                    "fupcast",
+                                )
+                                .unwrap()
+                                .into()
+                        } else if src.width() > dest.width() {
+                            self.builder
+                                .build_float_trunc(
+                                    generated_expr.into_float_value(),
+                                    llvm_ty.into_float_type(),
+                                    "fdowncast",
+                                )
+                                .unwrap()
+                                .into()
+                        } else {
+                            generated_expr
+                        }
+                    }
+                    (Type::Float(_), Type::Int(dest)) => {
+                        if dest.unsigned() {
+                            self.builder
+                                .build_float_to_unsigned_int(
+                                    generated_expr.into_float_value(),
+                                    llvm_ty.into_int_type(),
+                                    "ftoui",
+                                )
+                                .unwrap()
+                                .into()
+                        } else {
+                            self.builder
+                                .build_float_to_signed_int(
+                                    generated_expr.into_float_value(),
+                                    llvm_ty.into_int_type(),
+                                    "ftosi",
+                                )
+                                .unwrap()
+                                .into()
+                        }
+                    }
+                    (Type::Int(src), Type::Float(_)) => {
+                        if src.unsigned() {
+                            self.builder
+                                .build_unsigned_int_to_float(
+                                    generated_expr.into_int_value(),
+                                    llvm_ty.into_float_type(),
+                                    "uitof",
+                                )
+                                .unwrap()
+                                .into()
+                        } else {
+                            self.builder
+                                .build_signed_int_to_float(
+                                    generated_expr.into_int_value(),
+                                    llvm_ty.into_float_type(),
+                                    "sitof",
+                                )
+                                .unwrap()
+                                .into()
+                        }
+                    }
+                    (Type::Ref(_), Type::Ref(_)) => self
+                        .builder
+                        .build_pointer_cast(
+                            generated_expr.into_pointer_value(),
+                            llvm_ty.into_pointer_type(),
+                            "ptop",
+                        )
+                        .unwrap()
+                        .into(),
+                    (Type::Ref(_), Type::Int(_)) => self
+                        .builder
+                        .build_ptr_to_int(
+                            generated_expr.into_pointer_value(),
+                            llvm_ty.into_int_type(),
+                            "ptoi",
+                        )
+                        .unwrap()
+                        .into(),
+                    (Type::Int(_), Type::Ref(_)) => self
+                        .builder
+                        .build_int_to_ptr(
+                            generated_expr.into_int_value(),
+                            llvm_ty.into_pointer_type(),
+                            "itop",
+                        )
+                        .unwrap()
+                        .into(),
+                    (Type::Bool, Type::Int(dest)) => {
+                        if dest.width() > 8 {
+                            // NOTE: always use zero extend because otherwise true becomes -1 if
+                            // casted to signed int
+                            self.builder
+                                .build_int_z_extend(
+                                    generated_expr.into_int_value(),
+                                    llvm_ty.into_int_type(),
+                                    "upcast",
+                                )
+                                .unwrap()
+                                .into()
+                        } else {
+                            generated_expr
+                        }
+                    }
+                    _ => panic!("incorrect cast"),
+                })
+            }
         }
     }
 

@@ -1,4 +1,4 @@
-use ame_ast::{Expr, ExprKind, Stmt, StmtKind, UnaryOp};
+use ame_ast::{Expr, ExprKind, Stmt, StmtKind};
 use ame_lexer::{Keyword, Span, Token, TokenKind};
 
 type Result<T> = std::result::Result<T, ParseError>;
@@ -475,10 +475,19 @@ impl<'a> Parser<'a> {
                 kind: ExprKind::Literal(kind.clone()),
             }),
             TokenKind::Lparen => {
-                let expr = self.parse_expr(0);
-                self.expect(&TokenKind::Rparen)?;
+                if let Some(ty) = self.try_parse_ty()? {
+                    self.expect(&TokenKind::Rparen)?;
 
-                expr
+                    let expr = self.parse_expr(0)?;
+                    Ok(Expr {
+                        kind: ExprKind::Cast(ty, Box::new(expr)),
+                    })
+                } else {
+                    let expr = self.parse_expr(0);
+                    self.expect(&TokenKind::Rparen)?;
+
+                    expr
+                }
             }
             TokenKind::Ident(name) => {
                 if self.at(&TokenKind::Lparen) {

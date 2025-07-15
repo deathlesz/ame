@@ -425,6 +425,12 @@ impl<'a> Inferrer<'a> {
                     panic!("function `{name}` is not defined");
                 }
             }
+            ExprKind::Cast(ty, expr) => {
+                let ty: Type = ty.into();
+                let typed_expr = self.infer_expr(expr)?;
+
+                (TypedExprKind::Cast(ty.clone(), Box::new(typed_expr)), ty)
+            }
         };
 
         Ok(TypedExpr {

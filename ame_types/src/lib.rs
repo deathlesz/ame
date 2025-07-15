@@ -212,6 +212,17 @@ impl IntKind {
         )
     }
 
+    #[inline]
+    pub const fn width(&self) -> u8 {
+        use IntKind::*;
+
+        match self {
+            Int8 | Uint8 => 8,
+            Int16 | Uint16 => 16,
+            Int32 | Uint32 => 32,
+            Int64 | Uint64 => 64,
+        }
+    }
 }
 
 impl std::str::FromStr for IntKind {
@@ -239,6 +250,18 @@ pub enum FloatKind {
     Float32,
     #[default]
     Float64,
+}
+
+impl FloatKind {
+    #[inline]
+    pub const fn width(&self) -> u8 {
+        use FloatKind::*;
+
+        match self {
+            Float32 => 32,
+            Float64 => 64,
+        }
+    }
 }
 
 impl std::str::FromStr for FloatKind {

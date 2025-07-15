@@ -19,6 +19,7 @@ pub enum TypedExprKind {
     Binary(BinOp, Box<TypedExpr>, Box<TypedExpr>),
     Assign(AssignOp, Box<TypedExpr>, Box<TypedExpr>),
     FnCall(String, Vec<TypedExpr>),
+    Cast(Type, Box<TypedExpr>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
