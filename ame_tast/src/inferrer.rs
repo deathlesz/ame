@@ -200,6 +200,7 @@ impl<'a> Inferrer<'a> {
             }
             StmtKind::While { cond, body } => {
                 let typed_cond = self.infer_expr(cond)?;
+                unify(&typed_cond.ty, &Type::Bool, self.tcx)?;
 
                 self.env.enter();
                 let typed_body = self.infer(body)?;
@@ -207,6 +208,51 @@ impl<'a> Inferrer<'a> {
 
                 TypedStmtKind::While {
                     cond: typed_cond,
+                    body: typed_body,
+                }
+            }
+            StmtKind::For {
+                init,
+                cond,
+                action,
+                body,
+            } => {
+                self.env.enter();
+                let typed_init = if let Some(stmts) = init {
+                    let mut vec = Vec::with_capacity(stmts.len());
+
+                    for stmt in stmts.iter() {
+                        vec.push(self.infer_stmt(stmt)?);
+                    }
+
+                    Some(vec)
+                } else {
+                    None
+                };
+
+                let typed_cond = if let Some(expr) = cond {
+                    let typed_cond = self.infer_expr(expr)?;
+                    unify(&typed_cond.ty, &Type::Bool, self.tcx)?;
+
+                    Some(typed_cond)
+                } else {
+                    None
+                };
+
+                let typed_action = if let Some(expr) = action {
+                    Some(self.infer_expr(expr)?)
+                } else {
+                    None
+                };
+
+                let typed_body = self.infer(body)?;
+
+                self.env.exit();
+
+                TypedStmtKind::For {
+                    init: typed_init.map(Box::new),
+                    cond: typed_cond,
+                    action: typed_action,
                     body: typed_body,
                 }
             }

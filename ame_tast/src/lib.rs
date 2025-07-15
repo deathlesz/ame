@@ -51,5 +51,11 @@ pub enum TypedStmtKind {
         is_variadic: bool,
     },
     Return(Option<TypedExpr>),
+    For {
+        init: Option<Box<Vec<TypedStmt>>>,
+        cond: Option<TypedExpr>,
+        action: Option<TypedExpr>,
+        body: Vec<TypedStmt>,
+    },
     ExprStmt(TypedExpr),
 }

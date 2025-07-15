@@ -150,6 +150,7 @@ pub enum Keyword {
     Fn,
     Return,
     Extern,
+    For,
 }
 
 impl std::str::FromStr for Keyword {
@@ -165,6 +166,7 @@ impl std::str::FromStr for Keyword {
             "fn" => Ok(Keyword::Fn),
             "return" => Ok(Keyword::Return),
             "extern" => Ok(Keyword::Extern),
+            "for" => Ok(Keyword::For),
             _ => Err(()),
         }
     }

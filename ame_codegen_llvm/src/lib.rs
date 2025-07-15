@@ -272,6 +272,60 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         panic!("no current function")
                     }
                 }
+                TypedStmtKind::For {
+                    init,
+                    cond,
+                    action,
+                    body,
+                } => {
+                    if let Some(func) = self.current_func {
+                        let forbody = self.context.append_basic_block(func, "forbody");
+                        let forcont = self.context.append_basic_block(func, "forcont");
+
+                        self.locals.enter();
+                        self.fns.enter();
+
+                        if let Some(stmts) = init {
+                            self.generate_stmts(stmts);
+                        }
+
+                        if let Some(expr) = cond {
+                            let cond = self.generate_nonvoid_expr(expr).into_int_value();
+
+                            self.builder
+                                .build_conditional_branch(cond, forbody, forcont)
+                                .unwrap();
+                        } else {
+                            self.builder.build_unconditional_branch(forbody).unwrap();
+                        }
+
+                        self.builder.position_at_end(forbody);
+                        let returned = self.generate_stmts(body);
+
+                        if !returned {
+                            if let Some(expr) = action {
+                                self.generate_expr(expr);
+                            }
+
+                            if let Some(expr) = cond {
+                                let cond = self.generate_nonvoid_expr(expr).into_int_value();
+
+                                self.builder
+                                    .build_conditional_branch(cond, forbody, forcont)
+                                    .unwrap();
+                            } else {
+                                self.builder.build_unconditional_branch(forbody).unwrap();
+                            }
+                        }
+
+                        self.fns.exit();
+                        self.locals.exit();
+
+                        self.builder.position_at_end(forcont);
+                    } else {
+                        panic!("no current function")
+                    }
+                }
                 TypedStmtKind::ExprStmt(expr) => {
                     _ = self.generate_expr(expr); // we don't care if it's void
                 }

@@ -35,6 +35,21 @@ pub enum StmtKind {
     },
     Return(Option<Expr>),
     ExprStmt(Expr),
+    For {
+        init: Option<Box<Vec<Stmt>>>,
+        cond: Option<Expr>,
+        action: Option<Expr>,
+        body: Vec<Stmt>,
+    },
+}
+
+impl Expr {
+    #[inline]
+    pub fn into_stmt(self) -> Stmt {
+        Stmt {
+            kind: StmtKind::ExprStmt(self),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

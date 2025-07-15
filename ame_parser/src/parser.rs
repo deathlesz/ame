@@ -185,6 +185,7 @@ impl<'a> Parser<'a> {
                     expected: "fn(extern)".into(),
                     span: token.span,
                 }),
+                Keyword::For => Ok(Some(self.parse_for()?)),
             },
             TokenKind::Eof => Ok(None),
             TokenKind::Rbrace => Ok(None),
@@ -377,6 +378,49 @@ impl<'a> Parser<'a> {
 
         Ok(Stmt {
             kind: StmtKind::While { cond, body },
+        })
+    }
+
+    fn parse_for(&mut self) -> Result<Stmt> {
+        self.next(); // `for` keyword
+
+        let init = if self.at(&TokenKind::Keyword(Keyword::Let)) {
+            Some(self.parse_let()?)
+        } else if self.at(&TokenKind::Semicolon) {
+            self.next();
+
+            None
+        } else {
+            let expr = self.parse_expr(0)?;
+            self.expect(&TokenKind::Semicolon)?;
+
+            Some(vec![expr.into_stmt()])
+        };
+
+        let cond = if !self.at(&TokenKind::Semicolon) {
+            Some(self.parse_expr(0)?)
+        } else {
+            None
+        };
+        self.expect(&TokenKind::Semicolon)?;
+
+        let action = if !self.at(&TokenKind::Lbrace) {
+            Some(self.parse_expr(0)?)
+        } else {
+            None
+        };
+
+        self.expect(&TokenKind::Lbrace)?;
+        let body = self.parse()?;
+        self.expect(&TokenKind::Rbrace)?;
+
+        Ok(Stmt {
+            kind: StmtKind::For {
+                init: init.map(Box::new),
+                cond,
+                action,
+                body,
+            },
         })
     }
 
