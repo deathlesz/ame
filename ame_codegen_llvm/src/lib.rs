@@ -260,13 +260,17 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     }
                 }
                 TypedStmtKind::Return(expr) => {
-                    let value = expr.as_ref().and_then(|expr| self.generate_expr(expr));
+                    if let Some(_) = self.current_func {
+                        let value = expr.as_ref().and_then(|expr| self.generate_expr(expr));
 
-                    self.builder
-                        .build_return(value.as_ref().map(|v| v as &dyn BasicValue<'ctx>))
-                        .unwrap();
+                        self.builder
+                            .build_return(value.as_ref().map(|v| v as &dyn BasicValue<'ctx>))
+                            .unwrap();
 
-                    returned = true;
+                        returned = true;
+                    } else {
+                        panic!("no current function")
+                    }
                 }
                 TypedStmtKind::ExprStmt(expr) => {
                     _ = self.generate_expr(expr); // we don't care if it's void
