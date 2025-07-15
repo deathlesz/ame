@@ -495,15 +495,27 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     base,
                     empty: _,
                     value,
-                } => Some(
-                    llvm_ty
-                        .into_int_type()
-                        .const_int(
-                            i32::from_str_radix(value.trim(), *base as u32).unwrap() as u64,
-                            false,
-                        )
-                        .into(),
-                ),
+                } => match ty {
+                    Type::Int(kind) if kind.unsigned() => Some(
+                        llvm_ty
+                            .into_int_type()
+                            .const_int(
+                                u64::from_str_radix(value.trim(), *base as u32).unwrap(),
+                                false,
+                            )
+                            .into(),
+                    ),
+                    Type::Int(_) => Some(
+                        llvm_ty
+                            .into_int_type()
+                            .const_int(
+                                i64::from_str_radix(value.trim(), *base as u32).unwrap() as u64,
+                                true,
+                            )
+                            .into(),
+                    ),
+                    _ => unreachable!("int's type is always int"),
+                },
                 LiteralKind::Float {
                     base: _,
                     empty_exp: _,
