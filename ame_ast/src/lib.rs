@@ -41,6 +41,10 @@ pub enum StmtKind {
         action: Option<Expr>,
         body: Vec<Stmt>,
     },
+    ClassDecl {
+        name: String,
+        fields: Vec<(String, String)>,
+    },
 }
 
 impl Expr {
@@ -61,6 +65,7 @@ pub enum ExprKind {
     Assign(AssignOp, Box<Expr>, Box<Expr>),
     FnCall(String, Vec<Expr>),
     Cast(String, Box<Expr>),
+    ClassInst(String, Vec<(String, Expr)>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

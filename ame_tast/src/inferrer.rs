@@ -256,6 +256,7 @@ impl<'a> Inferrer<'a> {
                     body: typed_body,
                 }
             }
+            StmtKind::ClassDecl { name, fields } => todo!(),
             StmtKind::ExprStmt(expr) => TypedStmtKind::ExprStmt(self.infer_expr(expr)?),
         };
 
@@ -431,6 +432,7 @@ impl<'a> Inferrer<'a> {
 
                 (TypedExprKind::Cast(ty.clone(), Box::new(typed_expr)), ty)
             }
+            ExprKind::ClassInst(_, _) => todo!(),
         };
 
         Ok(TypedExpr {

@@ -186,6 +186,7 @@ impl<'a> Parser<'a> {
                     span: token.span,
                 }),
                 Keyword::For => Ok(Some(self.parse_for()?)),
+                Keyword::Class => Ok(Some(self.parse_class_decl()?)),
             },
             TokenKind::Eof => Ok(None),
             TokenKind::Rbrace => Ok(None),
@@ -424,6 +425,35 @@ impl<'a> Parser<'a> {
         })
     }
 
+    fn parse_class_decl(&mut self) -> Result<Stmt> {
+        self.next(); // `class` keyword
+
+        let name = self.expect_ident()?;
+        self.expect(&TokenKind::Lbrace)?;
+
+        let mut fields = vec![];
+        if !self.at(&TokenKind::Rbrace) {
+            loop {
+                let name = self.expect_ident()?;
+                self.expect(&TokenKind::Colon)?;
+                let ty = self.expect_ty()?;
+
+                fields.push((name, ty));
+
+                if self.at(&TokenKind::Rbrace) {
+                    self.next();
+                    break;
+                }
+
+                self.expect(&TokenKind::Comma)?;
+            }
+        }
+
+        Ok(Stmt {
+            kind: StmtKind::ClassDecl { name, fields },
+        })
+    }
+
     fn parse_expr(&mut self, min_bp: u8) -> Result<Expr> {
         let mut lhs = self.parse_atom()?;
 
@@ -505,6 +535,31 @@ impl<'a> Parser<'a> {
 
                     return Ok(Expr {
                         kind: ExprKind::FnCall(name.clone(), args),
+                    });
+                } else if self.at(&TokenKind::Lbrace) {
+                    // a class instantiation
+                    self.next();
+
+                    let mut fields = vec![];
+                    if !self.at(&TokenKind::Rbrace) {
+                        loop {
+                            let name = self.expect_ident()?;
+                            self.expect(&TokenKind::Colon)?;
+                            let value = self.parse_expr(0)?;
+
+                            fields.push((name, value));
+
+                            if self.at(&TokenKind::Rbrace) {
+                                self.next();
+                                break;
+                            }
+
+                            self.expect(&TokenKind::Comma)?;
+                        }
+                    }
+
+                    return Ok(Expr {
+                        kind: ExprKind::ClassInst(name.clone(), fields),
                     });
                 }
 
