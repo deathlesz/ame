@@ -3,87 +3,93 @@ use crate::token::{Base, Keyword, LiteralKind, Span, Token, TokenKind};
 const EOF: char = '\0';
 
 #[derive(Debug)]
-struct Lexer<'a> {
+pub struct Lexer<'a> {
+    src: &'a str,
     chars: std::str::Chars<'a>,
+    peek: char,
     pos: usize,
 }
 
 impl<'a> Lexer<'a> {
     #[inline]
-    fn new(src: &'a str) -> Self {
+    pub fn new(src: &'a str) -> Self {
+        let mut chars = src.chars();
+        let peek = chars.next().unwrap_or(EOF);
+
         Self {
-            chars: src.chars(),
+            src,
+            chars,
+            peek,
             pos: 0,
         }
     }
 
     #[inline]
     fn bump(&mut self) -> Option<char> {
-        let c = self.chars.next()?;
+        let c = self.peek;
+
+        if c == EOF {
+            return None;
+        }
+
         self.pos += c.len_utf8();
+        self.peek = self.chars.next().unwrap_or(EOF);
 
         Some(c)
     }
 
     #[inline]
     fn peek(&self) -> char {
-        self.chars.clone().next().unwrap_or(EOF)
-    }
-
-    #[inline]
-    fn is_eof(&self) -> bool {
-        self.chars.as_str().is_empty()
+        self.peek
     }
 
     #[inline]
     fn eat_while(&mut self, mut predicate: impl FnMut(char) -> bool) {
-        while predicate(self.peek()) && !self.is_eof() {
+        while predicate(self.peek()) && self.peek() != EOF {
             self.bump();
         }
     }
 
-    fn next(&mut self) -> Result<Token, LexError> {
-        let mut start_pos = self.pos;
+    pub fn next_token(&mut self) -> Result<Token, LexError> {
+        let mut start_pos;
 
-        let first;
         loop {
-            match self.bump() {
-                Some(c) if c.is_whitespace() => {
-                    start_pos += c.len_utf8();
+            start_pos = self.pos;
+
+            match self.peek() {
+                c if c.is_whitespace() => {
+                    self.bump();
                     continue;
                 }
-                Some('/') => match self.peek() {
-                    '/' => {
-                        self.eat_while(|c| c != '\n');
-                        start_pos = self.pos; // self.pos was advanced when skipping comment
+                '/' => {
+                    let mut lookahead = self.chars.clone();
 
-                        continue;
-                    }
-                    '*' => {
-                        while let Some(c) = self.bump() {
-                            if c == '*' && self.peek() == '/' {
-                                self.bump();
-                                break;
-                            }
+                    match lookahead.next() {
+                        Some('/') => {
+                            self.bump();
+                            self.eat_while(|c| c != '\n');
+
+                            continue;
                         }
+                        Some('*') => {
+                            self.bump();
+                            self.bump();
 
-                        start_pos = self.pos; // self.pos was advanced when skipping comment
-                    }
-                    '=' => {
-                        self.bump();
+                            while !(self.peek() == '*' && self.chars.clone().next() == Some('/')) {
+                                if self.bump().is_none() {
+                                    break;
+                                }
+                            }
 
-                        return Ok(Token::new(
-                            TokenKind::SlashAssign,
-                            Span::new(start_pos, self.pos),
-                        ));
+                            self.bump();
+                            self.bump();
+
+                            continue;
+                        }
+                        _ => break,
                     }
-                    _ => return Ok(Token::new(TokenKind::Slash, Span::new(start_pos, self.pos))),
-                },
-                Some(c) => {
-                    first = c;
-                    break;
                 }
-                None => return Ok(Token::new(TokenKind::Eof, Span::new(self.pos, self.pos))),
+                _ => break,
             }
         }
 
@@ -98,25 +104,28 @@ impl<'a> Lexer<'a> {
             };
         }
 
+        let first = if let Some(c) = self.bump() {
+            c
+        } else {
+            return Ok(Token::new(
+                TokenKind::Eof,
+                Span {
+                    start: start_pos,
+                    end: self.pos,
+                },
+            ));
+        };
+
         let kind = match first {
             c if c == '_' || unicode_xid::UnicodeXID::is_xid_start(c) => {
-                let mut ident = String::from(c);
+                self.eat_while(unicode_xid::UnicodeXID::is_xid_continue);
 
-                loop {
-                    let next = self.peek();
-
-                    if !unicode_xid::UnicodeXID::is_xid_continue(next) {
-                        break;
-                    }
-
-                    self.bump();
-                    ident.push(next);
-                }
+                let ident = &self.src[start_pos..self.pos];
 
                 if let Ok(keyword) = ident.parse::<Keyword>() {
                     TokenKind::Keyword(keyword)
                 } else {
-                    TokenKind::Ident(ident)
+                    TokenKind::Ident(ident.into())
                 }
             }
             c @ '0'..='9' => {
@@ -134,6 +143,7 @@ impl<'a> Lexer<'a> {
             '+' => or_assign!(TokenKind::PlusAssign, TokenKind::Plus),
             '-' => or_assign!(TokenKind::MinusAssign, TokenKind::Minus),
             '*' => or_assign!(TokenKind::AsteriskAssign, TokenKind::Asterisk),
+            '/' => or_assign!(TokenKind::SlashAssign, TokenKind::Slash),
             '%' => or_assign!(TokenKind::PercentAssign, TokenKind::Percent),
             '&' => {
                 if self.peek() == '=' {
@@ -417,28 +427,6 @@ impl<'a> Lexer<'a> {
     }
 }
 
-pub fn tokenize(src: &str) -> impl Iterator<Item = Result<Token, LexError>> + '_ {
-    use std::rc::Rc;
-
-    let mut lexer = Lexer::new(src);
-    let mut eof_encountered = Rc::new(false); // FIXME: idk what to do here tbh
-
-    std::iter::from_fn(move || {
-        let token = lexer.next();
-
-        if *eof_encountered {
-            None
-        } else if matches!(&token, Ok(token) if token.kind != TokenKind::Eof) {
-            Some(token)
-        } else {
-            let eof_encountered = Rc::get_mut(&mut eof_encountered).unwrap();
-            *eof_encountered = true;
-
-            Some(token)
-        }
-    })
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LexError {
     UnknownToken(char),
@@ -455,6 +443,37 @@ impl std::fmt::Display for LexError {
 }
 
 impl std::error::Error for LexError {}
+
+struct Iter<'a> {
+    lexer: Lexer<'a>,
+    finished: bool,
+}
+
+impl<'a> Iterator for Iter<'a> {
+    type Item = Result<Token, LexError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.finished {
+            return None;
+        }
+
+        let token = self.lexer.next_token();
+        if let Ok(token) = &token
+            && token.kind == TokenKind::Eof
+        {
+            self.finished = true;
+        }
+
+        Some(token)
+    }
+}
+
+pub fn tokenize(src: &str) -> impl Iterator<Item = Result<Token, LexError>> + '_ {
+    Iter {
+        lexer: Lexer::new(src),
+        finished: false,
+    }
+}
 
 #[cfg(test)]
 mod tests {
