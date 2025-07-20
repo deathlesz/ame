@@ -1,4 +1,4 @@
-use ame_ast::{Expr, ExprKind, Stmt, StmtKind};
+use ame_ast::{Ast, Expr, ExprId, ExprKind, Stmt, StmtId, StmtKind};
 use ame_lexer::{Keyword, Span, Token, TokenKind};
 
 type Result<T> = std::result::Result<T, ParseError>;
@@ -6,19 +6,21 @@ type Result<T> = std::result::Result<T, ParseError>;
 #[derive(Debug)]
 pub struct Parser<'a> {
     tokens: &'a [Token],
+    pos: usize,
+    ast: Ast,
     // NOTE: probably not the best decision, but i don't want all functions to return Vecs
     // TODO: also, should probably use TinyVec or smth
-    backlog: Vec<Stmt>,
-    pos: usize,
+    backlog: Vec<StmtId>,
 }
 
 impl<'a> Parser<'a> {
     #[inline]
-    pub const fn new(tokens: &'a [Token]) -> Self {
+    pub fn new(tokens: &'a [Token]) -> Self {
         Self {
             tokens,
-            backlog: vec![],
+            ast: Ast::new(),
             pos: 0,
+            backlog: vec![],
         }
     }
 
@@ -131,7 +133,13 @@ impl<'a> Parser<'a> {
         Ok(ident)
     }
 
-    pub fn parse(&mut self) -> Result<Vec<Stmt>> {
+    pub fn parse(mut self) -> Result<(Ast, Vec<StmtId>)> {
+        let stmts = self.parse_stmts()?;
+
+        Ok((self.ast, stmts))
+    }
+
+    fn parse_stmts(&mut self) -> Result<Vec<StmtId>> {
         let mut stmts = Vec::new();
         while let Some(stmt) = self.parse_stmt()? {
             stmts.push(stmt);
@@ -140,7 +148,7 @@ impl<'a> Parser<'a> {
         Ok(stmts)
     }
 
-    fn parse_stmt(&mut self) -> Result<Option<Stmt>> {
+    fn parse_stmt(&mut self) -> Result<Option<StmtId>> {
         if let Some(stmt) = self.backlog.pop() {
             return Ok(Some(stmt));
         }
@@ -176,9 +184,7 @@ impl<'a> Parser<'a> {
 
                     self.expect(&TokenKind::Semicolon)?;
 
-                    Ok(Some(Stmt {
-                        kind: StmtKind::Return(expr),
-                    }))
+                    Ok(Some(self.ast.alloc_stmt(Stmt::new(StmtKind::Return(expr)))))
                 }
                 Keyword::Extern => Err(ParseError::Unexpected {
                     got: kw.clone(),
@@ -194,14 +200,14 @@ impl<'a> Parser<'a> {
                 let expr = self.parse_expr(0)?;
                 self.expect(&TokenKind::Semicolon)?;
 
-                Ok(Some(Stmt {
-                    kind: StmtKind::ExprStmt(expr),
-                }))
+                Ok(Some(
+                    self.ast.alloc_stmt(Stmt::new(StmtKind::ExprStmt(expr))),
+                ))
             }
         }
     }
 
-    fn parse_let(&mut self) -> Result<Vec<Stmt>> {
+    fn parse_let(&mut self) -> Result<Vec<StmtId>> {
         self.next(); // `let` keyword
 
         let mut decls = vec![];
@@ -220,13 +226,11 @@ impl<'a> Parser<'a> {
                 None
             };
 
-            decls.push(Stmt {
-                kind: StmtKind::VarDecl {
-                    name,
-                    ty,
-                    init_expr,
-                },
-            });
+            decls.push(self.ast.alloc_stmt(Stmt::new(StmtKind::VarDecl {
+                name,
+                ty,
+                init_expr,
+            })));
 
             if self.at(&TokenKind::Semicolon) {
                 self.next();
@@ -240,12 +244,12 @@ impl<'a> Parser<'a> {
         Ok(decls)
     }
 
-    fn parse_if(&mut self) -> Result<Stmt> {
+    fn parse_if(&mut self) -> Result<StmtId> {
         self.next(); // `if` keyword
 
         let cond = self.parse_expr(0)?;
         self.expect(&TokenKind::Lbrace)?;
-        let body = self.parse()?;
+        let body = self.parse_stmts()?;
         self.expect(&TokenKind::Rbrace)?;
 
         let mut branches = vec![];
@@ -257,33 +261,29 @@ impl<'a> Parser<'a> {
 
                 let cond = self.parse_expr(0)?;
                 self.expect(&TokenKind::Lbrace)?;
-                let body = self.parse()?;
+                let body = self.parse_stmts()?;
                 self.expect(&TokenKind::Rbrace)?;
 
                 branches.push((cond, body))
             } else {
                 self.expect(&TokenKind::Lbrace)?;
-                let else_body = self.parse()?;
+                let else_body = self.parse_stmts()?;
                 self.expect(&TokenKind::Rbrace)?;
 
-                return Ok(Stmt {
-                    kind: StmtKind::If {
-                        branches,
-                        else_body: Some(else_body),
-                    },
-                });
+                return Ok(self.ast.alloc_stmt(Stmt::new(StmtKind::If {
+                    branches,
+                    else_body: Some(else_body),
+                })));
             }
         }
 
-        Ok(Stmt {
-            kind: StmtKind::If {
-                branches,
-                else_body: None,
-            },
-        })
+        Ok(self.ast.alloc_stmt(Stmt::new(StmtKind::If {
+            branches,
+            else_body: None,
+        })))
     }
 
-    fn parse_fn(&mut self) -> Result<Stmt> {
+    fn parse_fn(&mut self) -> Result<StmtId> {
         self.next(); // `fn` keyword
 
         let is_extern = if self.at(&TokenKind::Lparen) {
@@ -323,13 +323,11 @@ impl<'a> Parser<'a> {
 
                 // NOTE: maybe this is genius, maybe it's fucking awful
                 // we'll see
-                args.push(Stmt {
-                    kind: StmtKind::VarDecl {
-                        name,
-                        ty: Some(ty),
-                        init_expr,
-                    },
-                });
+                args.push(self.ast.alloc_stmt(Stmt::new(StmtKind::VarDecl {
+                    name,
+                    ty: Some(ty),
+                    init_expr,
+                })));
 
                 if self.at(&TokenKind::Rparen) {
                     break;
@@ -345,7 +343,7 @@ impl<'a> Parser<'a> {
 
         let body = if self.at(&TokenKind::Lbrace) {
             self.next();
-            let body = self.parse()?;
+            let body = self.parse_stmts()?;
             self.expect(&TokenKind::Rbrace)?;
 
             Some(body)
@@ -357,32 +355,30 @@ impl<'a> Parser<'a> {
             panic!("non-extern fns without body aren't allowed")
         };
 
-        Ok(Stmt {
-            kind: StmtKind::FnDecl {
-                name,
-                args,
-                body,
-                return_ty,
-                is_extern,
-                is_variadic,
-            },
-        })
+        Ok(self.ast.alloc_stmt(Stmt::new(StmtKind::FnDecl {
+            name,
+            args,
+            body,
+            return_ty,
+            is_extern,
+            is_variadic,
+        })))
     }
 
-    fn parse_while(&mut self) -> Result<Stmt> {
+    fn parse_while(&mut self) -> Result<StmtId> {
         self.next(); // `while` keyword
 
         let cond = self.parse_expr(0)?;
         self.expect(&TokenKind::Lbrace)?;
-        let body = self.parse()?;
+        let body = self.parse_stmts()?;
         self.expect(&TokenKind::Rbrace)?;
 
-        Ok(Stmt {
-            kind: StmtKind::While { cond, body },
-        })
+        Ok(self
+            .ast
+            .alloc_stmt(Stmt::new(StmtKind::While { cond, body })))
     }
 
-    fn parse_for(&mut self) -> Result<Stmt> {
+    fn parse_for(&mut self) -> Result<StmtId> {
         self.next(); // `for` keyword
 
         let init = if self.at(&TokenKind::Keyword(Keyword::Let)) {
@@ -395,7 +391,9 @@ impl<'a> Parser<'a> {
             let expr = self.parse_expr(0)?;
             self.expect(&TokenKind::Semicolon)?;
 
-            Some(vec![expr.into_stmt()])
+            Some(vec![self
+                .ast
+                .alloc_stmt(Stmt::new(StmtKind::ExprStmt(expr)))])
         };
 
         let cond = if !self.at(&TokenKind::Semicolon) {
@@ -412,20 +410,18 @@ impl<'a> Parser<'a> {
         };
 
         self.expect(&TokenKind::Lbrace)?;
-        let body = self.parse()?;
+        let body = self.parse_stmts()?;
         self.expect(&TokenKind::Rbrace)?;
 
-        Ok(Stmt {
-            kind: StmtKind::For {
-                init: init.map(Box::new),
-                cond,
-                action,
-                body,
-            },
-        })
+        Ok(self.ast.alloc_stmt(Stmt::new(StmtKind::For {
+            init: init.map(Box::new),
+            cond,
+            action,
+            body,
+        })))
     }
 
-    fn parse_class_decl(&mut self) -> Result<Stmt> {
+    fn parse_class_decl(&mut self) -> Result<StmtId> {
         self.next(); // `class` keyword
 
         let name = self.expect_ident()?;
@@ -449,12 +445,12 @@ impl<'a> Parser<'a> {
             }
         }
 
-        Ok(Stmt {
-            kind: StmtKind::ClassDecl { name, fields },
-        })
+        Ok(self
+            .ast
+            .alloc_stmt(Stmt::new(StmtKind::ClassDecl { name, fields })))
     }
 
-    fn parse_expr(&mut self, min_bp: u8) -> Result<Expr> {
+    fn parse_expr(&mut self, min_bp: u8) -> Result<ExprId> {
         let mut lhs = self.parse_atom()?;
 
         while let Some((l_bp, r_bp)) = infix_binding_power(self.peek()) {
@@ -465,30 +461,26 @@ impl<'a> Parser<'a> {
             let op = self.next().clone();
             match &op.kind {
                 kind if kind.is_assign() => {
-                    if !matches!(lhs.kind, ExprKind::Variable(_)) {
+                    if !matches!(self.ast[lhs].kind(), ExprKind::Variable(_)) {
                         return Err(ParseError::InvalidLValue);
                     }
 
                     let rhs = self.parse_expr(r_bp)?;
 
-                    lhs = Expr {
-                        kind: ExprKind::Assign(
-                            op.try_into().unwrap(),
-                            Box::new(lhs),
-                            Box::new(rhs),
-                        ),
-                    }
+                    lhs = self.ast.alloc_expr(Expr::new(ExprKind::Assign(
+                        op.try_into().unwrap(),
+                        lhs,
+                        rhs,
+                    )))
                 }
                 kind if kind.is_binary() => {
                     let rhs = self.parse_expr(r_bp)?;
 
-                    lhs = Expr {
-                        kind: ExprKind::Binary(
-                            op.try_into().unwrap(),
-                            Box::new(lhs),
-                            Box::new(rhs),
-                        ),
-                    };
+                    lhs = self.ast.alloc_expr(Expr::new(ExprKind::Binary(
+                        op.try_into().unwrap(),
+                        lhs,
+                        rhs,
+                    )))
                 }
                 t => panic!("unhandled token in expr: {t:?}"),
             }
@@ -497,21 +489,19 @@ impl<'a> Parser<'a> {
         Ok(lhs)
     }
 
-    fn parse_atom(&mut self) -> Result<Expr> {
+    fn parse_atom(&mut self) -> Result<ExprId> {
         let token = self.next().clone();
 
         match &token.kind {
-            TokenKind::Literal { kind } => Ok(Expr {
-                kind: ExprKind::Literal(kind.clone()),
-            }),
+            TokenKind::Literal { kind } => Ok(self
+                .ast
+                .alloc_expr(Expr::new(ExprKind::Literal(kind.clone())))),
             TokenKind::Lparen => {
                 if let Some(ty) = self.try_parse_ty()? {
                     self.expect(&TokenKind::Rparen)?;
 
                     let expr = self.parse_expr(0)?;
-                    Ok(Expr {
-                        kind: ExprKind::Cast(ty, Box::new(expr)),
-                    })
+                    Ok(self.ast.alloc_expr(Expr::new(ExprKind::Cast(ty, expr))))
                 } else {
                     let expr = self.parse_expr(0);
                     self.expect(&TokenKind::Rparen)?;
@@ -533,9 +523,9 @@ impl<'a> Parser<'a> {
                     }
                     self.next();
 
-                    return Ok(Expr {
-                        kind: ExprKind::FnCall(name.clone(), args),
-                    });
+                    return Ok(self
+                        .ast
+                        .alloc_expr(Expr::new(ExprKind::FnCall(name.clone(), args))));
                 } else if self.at(&TokenKind::Lbrace) {
                     // a class instantiation
                     self.next();
@@ -558,21 +548,21 @@ impl<'a> Parser<'a> {
                         }
                     }
 
-                    return Ok(Expr {
-                        kind: ExprKind::ClassInst(name.clone(), fields),
-                    });
+                    return Ok(self
+                        .ast
+                        .alloc_expr(Expr::new(ExprKind::ClassInst(name.clone(), fields))));
                 }
 
-                Ok(Expr {
-                    kind: ExprKind::Variable(name.clone()),
-                })
+                Ok(self
+                    .ast
+                    .alloc_expr(Expr::new(ExprKind::Variable(name.clone()))))
             }
             kind if kind.is_unary() => {
                 let expr = self.parse_atom()?;
 
-                Ok(Expr {
-                    kind: ExprKind::Unary(token.try_into().unwrap(), Box::new(expr)),
-                })
+                Ok(self
+                    .ast
+                    .alloc_expr(Expr::new(ExprKind::Unary(token.try_into().unwrap(), expr))))
             }
             got => Err(ParseError::Unexpected {
                 got: got.clone(),

@@ -1,13 +1,89 @@
 use ame_lexer::{LiteralKind, Token, TokenKind};
 
+use ame_common::{Arena, Id};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct StmtId(Id<Stmt>);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ExprId(Id<Expr>);
+
+#[derive(Debug, Clone, Default)]
+pub struct Ast {
+    stmts: Arena<Stmt>,
+    exprs: Arena<Expr>,
+}
+
+impl Ast {
+    #[inline]
+    pub fn new() -> Self {
+        Self {
+            stmts: Arena::new(),
+            exprs: Arena::new(),
+        }
+    }
+
+    #[inline]
+    pub fn alloc_stmt(&mut self, stmt: Stmt) -> StmtId {
+        StmtId(self.stmts.alloc(stmt))
+    }
+
+    #[inline]
+    pub fn alloc_expr(&mut self, expr: Expr) -> ExprId {
+        ExprId(self.exprs.alloc(expr))
+    }
+}
+
+impl std::ops::Index<StmtId> for Ast {
+    type Output = Stmt;
+
+    #[inline]
+    fn index(&self, index: StmtId) -> &Self::Output {
+        &self.stmts[index.0]
+    }
+}
+
+impl std::ops::Index<ExprId> for Ast {
+    type Output = Expr;
+
+    #[inline]
+    fn index(&self, index: ExprId) -> &Self::Output {
+        &self.exprs[index.0]
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Stmt {
-    pub kind: StmtKind,
+    kind: StmtKind,
+}
+
+impl Stmt {
+    #[inline]
+    pub const fn new(kind: StmtKind) -> Self {
+        Self { kind }
+    }
+
+    #[inline]
+    pub const fn kind(&self) -> &StmtKind {
+        &self.kind
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Expr {
-    pub kind: ExprKind,
+    kind: ExprKind,
+}
+
+impl Expr {
+    #[inline]
+    pub const fn new(kind: ExprKind) -> Self {
+        Self { kind }
+    }
+
+    #[inline]
+    pub const fn kind(&self) -> &ExprKind {
+        &self.kind
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -15,31 +91,31 @@ pub enum StmtKind {
     VarDecl {
         name: String,
         ty: Option<String>,
-        init_expr: Option<Expr>,
+        init_expr: Option<ExprId>,
     },
     If {
-        branches: Vec<(Expr, Vec<Stmt>)>,
-        else_body: Option<Vec<Stmt>>,
+        branches: Vec<(ExprId, Vec<StmtId>)>,
+        else_body: Option<Vec<StmtId>>,
     },
     While {
-        cond: Expr,
-        body: Vec<Stmt>,
+        cond: ExprId,
+        body: Vec<StmtId>,
     },
     FnDecl {
         name: String,
-        args: Vec<Stmt>,
-        body: Option<Vec<Stmt>>,
+        args: Vec<StmtId>,
+        body: Option<Vec<StmtId>>,
         return_ty: Option<String>,
         is_extern: bool,
         is_variadic: bool,
     },
-    Return(Option<Expr>),
-    ExprStmt(Expr),
+    Return(Option<ExprId>),
+    ExprStmt(ExprId),
     For {
-        init: Option<Box<Vec<Stmt>>>,
-        cond: Option<Expr>,
-        action: Option<Expr>,
-        body: Vec<Stmt>,
+        init: Option<Box<Vec<StmtId>>>,
+        cond: Option<ExprId>,
+        action: Option<ExprId>,
+        body: Vec<StmtId>,
     },
     ClassDecl {
         name: String,
@@ -47,25 +123,16 @@ pub enum StmtKind {
     },
 }
 
-impl Expr {
-    #[inline]
-    pub fn into_stmt(self) -> Stmt {
-        Stmt {
-            kind: StmtKind::ExprStmt(self),
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExprKind {
     Literal(LiteralKind),
     Variable(String),
-    Unary(UnaryOp, Box<Expr>),
-    Binary(BinOp, Box<Expr>, Box<Expr>),
-    Assign(AssignOp, Box<Expr>, Box<Expr>),
-    FnCall(String, Vec<Expr>),
-    Cast(String, Box<Expr>),
-    ClassInst(String, Vec<(String, Expr)>),
+    Unary(UnaryOp, ExprId),
+    Binary(BinOp, ExprId, ExprId),
+    Assign(AssignOp, ExprId, ExprId),
+    FnCall(String, Vec<ExprId>),
+    Cast(String, ExprId),
+    ClassInst(String, Vec<(String, ExprId)>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

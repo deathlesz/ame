@@ -23,3 +23,8 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 keywords = ["compiler", "language", "ame"]
 readme = "README.md"
+
+[profile.release]
+# increased performance by 3-4 times on a 2 million loc file
+# i think it's worth it
+lto = true

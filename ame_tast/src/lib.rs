@@ -1,3 +1,4 @@
+use ame_common::{Arena, Id};
 use ame_lexer::LiteralKind;
 use ame_types::Type;
 
@@ -5,26 +6,95 @@ mod inferrer;
 pub use ame_ast::{AssignOp, BinOp, UnaryOp};
 pub use inferrer::*;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct TypedStmtId(Id<TypedStmt>);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct TypedExprId(Id<TypedExpr>);
+
+#[derive(Debug, Clone, Default)]
+pub struct TypedAst {
+    stmts: Arena<TypedStmt>,
+    exprs: Arena<TypedExpr>,
+}
+
+impl TypedAst {
+    #[inline]
+    pub fn new() -> Self {
+        Self {
+            stmts: Arena::new(),
+            exprs: Arena::new(),
+        }
+    }
+
+    #[inline]
+    pub fn alloc_stmt(&mut self, stmt: TypedStmt) -> TypedStmtId {
+        TypedStmtId(self.stmts.alloc(stmt))
+    }
+
+    #[inline]
+    pub fn alloc_expr(&mut self, expr: TypedExpr) -> TypedExprId {
+        TypedExprId(self.exprs.alloc(expr))
+    }
+}
+
+impl std::ops::Index<TypedStmtId> for TypedAst {
+    type Output = TypedStmt;
+
+    #[inline]
+    fn index(&self, index: TypedStmtId) -> &Self::Output {
+        &self.stmts[index.0]
+    }
+}
+
+impl std::ops::Index<TypedExprId> for TypedAst {
+    type Output = TypedExpr;
+
+    #[inline]
+    fn index(&self, index: TypedExprId) -> &Self::Output {
+        &self.exprs[index.0]
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TypedExpr {
-    pub kind: TypedExprKind,
-    pub ty: Type,
+    kind: TypedExprKind,
+    ty: Type,
+}
+
+impl TypedExpr {
+    #[inline]
+    pub fn kind(&self) -> &TypedExprKind {
+        &self.kind
+    }
+
+    #[inline]
+    pub fn ty(&self) -> &Type {
+        &self.ty
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TypedExprKind {
     Literal(LiteralKind),
     Variable(String),
-    Unary(UnaryOp, Box<TypedExpr>),
-    Binary(BinOp, Box<TypedExpr>, Box<TypedExpr>),
-    Assign(AssignOp, Box<TypedExpr>, Box<TypedExpr>),
-    FnCall(String, Vec<TypedExpr>),
-    Cast(Type, Box<TypedExpr>),
+    Unary(UnaryOp, TypedExprId),
+    Binary(BinOp, TypedExprId, TypedExprId),
+    Assign(AssignOp, TypedExprId, TypedExprId),
+    FnCall(String, Vec<TypedExprId>),
+    Cast(Type, TypedExprId),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TypedStmt {
-    pub kind: TypedStmtKind,
+    kind: TypedStmtKind,
+}
+
+impl TypedStmt {
+    #[inline]
+    pub fn kind(&self) -> &TypedStmtKind {
+        &self.kind
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -32,31 +102,31 @@ pub enum TypedStmtKind {
     VarDecl {
         name: String,
         ty: Type,
-        init_expr: Option<TypedExpr>,
+        init_expr: Option<TypedExprId>,
     },
     If {
-        branches: Vec<(TypedExpr, Vec<TypedStmt>)>,
-        else_body: Option<Vec<TypedStmt>>,
+        branches: Vec<(TypedExprId, Vec<TypedStmtId>)>,
+        else_body: Option<Vec<TypedStmtId>>,
     },
     While {
-        cond: TypedExpr,
-        body: Vec<TypedStmt>,
+        cond: TypedExprId,
+        body: Vec<TypedStmtId>,
     },
     FnDecl {
         name: String,
-        args: Vec<TypedStmt>,
-        body: Option<Vec<TypedStmt>>,
+        args: Vec<TypedStmtId>,
+        body: Option<Vec<TypedStmtId>>,
         return_ty: Type,
 
         is_extern: bool,
         is_variadic: bool,
     },
-    Return(Option<TypedExpr>),
+    Return(Option<TypedExprId>),
     For {
-        init: Option<Box<Vec<TypedStmt>>>,
-        cond: Option<TypedExpr>,
-        action: Option<TypedExpr>,
-        body: Vec<TypedStmt>,
+        init: Option<Vec<TypedStmtId>>,
+        cond: Option<TypedExprId>,
+        action: Option<TypedExprId>,
+        body: Vec<TypedStmtId>,
     },
-    ExprStmt(TypedExpr),
+    ExprStmt(TypedExprId),
 }

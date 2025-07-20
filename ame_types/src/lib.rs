@@ -52,6 +52,10 @@ impl Type {
 impl std::str::FromStr for Type {
     type Err = Infallible;
 
+    #[allow(
+        clippy::manual_strip,
+        reason = "need to somehow box it `n` times to use"
+    )]
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         if let Ok(kind) = s.parse::<IntKind>() {
             Ok(Self::Int(kind))
