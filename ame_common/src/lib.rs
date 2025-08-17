@@ -1,7 +1,9 @@
 pub mod arena;
+pub mod interner;
 pub mod scopestack;
 
 pub use arena::{Id, IdArena as Arena};
+pub use interner::{Interned, Interner};
 pub use scopestack::ScopeStack;
 
 // expose to other compiler parts

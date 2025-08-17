@@ -31,7 +31,7 @@ impl<K: Eq + std::hash::Hash, V> ScopeStack<K, V> {
     pub fn define(&mut self, name: K, value: V) {
         self.scopes
             .last_mut()
-            .expect("global scope should always exist")
+            .expect("global scope is never popped")
             .insert(name, value);
     }
 
