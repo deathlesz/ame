@@ -44,15 +44,16 @@ impl<'a> Parser<'a> {
         &self.peek().kind == kind
     }
 
-    // fn eat(&mut self, kind: &TokenKind) -> bool {
-    //     if self.at(kind) {
-    //         self.next();
-    //
-    //         true
-    //     } else {
-    //         false
-    //     }
-    // }
+    #[inline]
+    fn eat(&mut self, kind: &TokenKind) -> bool {
+        if self.at(kind) {
+            self.next();
+
+            true
+        } else {
+            false
+        }
+    }
 
     fn expect(&mut self, kind: &TokenKind) -> Result<&Token> {
         if self.at(kind) {
@@ -86,13 +87,7 @@ impl<'a> Parser<'a> {
     }
 
     fn try_parse_ty(&mut self) -> Result<Option<String>> {
-        let is_ref = if self.at(&TokenKind::Amp) {
-            self.next();
-
-            true
-        } else {
-            false
-        };
+        let is_ref = self.eat(&TokenKind::Amp);
 
         if !matches!(self.peek().kind, TokenKind::Ident(_)) {
             if is_ref {
@@ -117,13 +112,7 @@ impl<'a> Parser<'a> {
     }
 
     fn expect_ty(&mut self) -> Result<String> {
-        let is_ref = if self.at(&TokenKind::Amp) {
-            self.next();
-
-            true
-        } else {
-            false
-        };
+        let is_ref = self.eat(&TokenKind::Amp);
 
         let mut ident = self.expect_ident()?;
         if is_ref {
@@ -213,14 +202,13 @@ impl<'a> Parser<'a> {
         let mut decls = vec![];
         loop {
             let name = self.expect_ident()?;
-            let ty = if self.expect(&TokenKind::Colon).is_ok() {
+            let ty = if self.eat(&TokenKind::Colon) {
                 Some(self.expect_ty()?)
             } else {
                 None
             };
 
-            let with_init = self.expect(&TokenKind::Assign).is_ok();
-            let init_expr = if with_init {
+            let init_expr = if self.eat(&TokenKind::Assign) {
                 Some(self.parse_expr(0)?)
             } else {
                 None
@@ -232,8 +220,7 @@ impl<'a> Parser<'a> {
                 init_expr,
             })));
 
-            if self.at(&TokenKind::Semicolon) {
-                self.next();
+            if self.eat(&TokenKind::Semicolon) {
                 break;
             }
 
@@ -256,9 +243,7 @@ impl<'a> Parser<'a> {
         branches.push((cond, body));
 
         while self.expect(&TokenKind::Keyword(Keyword::Else)).is_ok() {
-            if self.at(&TokenKind::Keyword(Keyword::If)) {
-                self.next(); // `if` keyword
-
+            if self.eat(&TokenKind::Keyword(Keyword::If)) {
                 let cond = self.parse_expr(0)?;
                 self.expect(&TokenKind::Lbrace)?;
                 let body = self.parse_stmts()?;
@@ -286,15 +271,11 @@ impl<'a> Parser<'a> {
     fn parse_fn(&mut self) -> Result<StmtId> {
         self.next(); // `fn` keyword
 
-        let is_extern = if self.at(&TokenKind::Lparen) {
-            self.next();
+        let is_extern = self.eat(&TokenKind::Lparen);
+        if is_extern {
             self.expect(&TokenKind::Keyword(Keyword::Extern))?;
             self.expect(&TokenKind::Rparen)?;
-
-            true
-        } else {
-            false
-        };
+        }
 
         let name = self.expect_ident()?;
 
@@ -321,7 +302,7 @@ impl<'a> Parser<'a> {
                     None
                 };
 
-                // NOTE: maybe this is genius, maybe it's fucking awful
+                // HACK: maybe this is genius, maybe it's fucking awful
                 // we'll see
                 args.push(self.ast.alloc_stmt(Stmt::new(StmtKind::VarDecl {
                     name,
@@ -341,8 +322,7 @@ impl<'a> Parser<'a> {
         // will break for, e.g. fn add(a: int32, b: int32) & { ... }
         let return_ty = self.try_parse_ty()?;
 
-        let body = if self.at(&TokenKind::Lbrace) {
-            self.next();
+        let body = if self.eat(&TokenKind::Lbrace) {
             let body = self.parse_stmts()?;
             self.expect(&TokenKind::Rbrace)?;
 
@@ -383,17 +363,15 @@ impl<'a> Parser<'a> {
 
         let init = if self.at(&TokenKind::Keyword(Keyword::Let)) {
             Some(self.parse_let()?)
-        } else if self.at(&TokenKind::Semicolon) {
-            self.next();
-
+        } else if self.eat(&TokenKind::Semicolon) {
             None
         } else {
             let expr = self.parse_expr(0)?;
             self.expect(&TokenKind::Semicolon)?;
 
-            Some(vec![self
-                .ast
-                .alloc_stmt(Stmt::new(StmtKind::ExprStmt(expr)))])
+            Some(vec![
+                self.ast.alloc_stmt(Stmt::new(StmtKind::ExprStmt(expr))),
+            ])
         };
 
         let cond = if !self.at(&TokenKind::Semicolon) {
@@ -510,10 +488,8 @@ impl<'a> Parser<'a> {
                 }
             }
             TokenKind::Ident(name) => {
-                if self.at(&TokenKind::Lparen) {
-                    // actually a function call
-                    self.next();
-
+                // actually a function call
+                if self.eat(&TokenKind::Lparen) {
                     let mut args = vec![];
                     while !self.at(&TokenKind::Rparen) {
                         args.push(self.parse_expr(0)?);
@@ -526,10 +502,8 @@ impl<'a> Parser<'a> {
                     return Ok(self
                         .ast
                         .alloc_expr(Expr::new(ExprKind::FnCall(name.clone(), args))));
-                } else if self.at(&TokenKind::Lbrace) {
+                } else if self.eat(&TokenKind::Lbrace) {
                     // a class instantiation
-                    self.next();
-
                     let mut fields = vec![];
                     if !self.at(&TokenKind::Rbrace) {
                         loop {
