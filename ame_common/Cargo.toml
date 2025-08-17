@@ -9,4 +9,3 @@ readme.workspace = true
 
 [dependencies]
 rustc-hash = "2"
-id-arena = "2"
