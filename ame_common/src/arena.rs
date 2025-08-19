@@ -49,6 +49,16 @@ impl<T> IdArena<T> {
             .get_mut(id.id as usize)
             .expect("supplied id is from a different arena")
     }
+
+    #[inline]
+    pub const fn len(&self) -> u32 {
+        self.inner.len() as u32
+    }
+
+    #[inline]
+    pub const fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 impl<T> Default for IdArena<T> {
