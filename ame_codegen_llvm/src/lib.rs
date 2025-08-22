@@ -2,15 +2,15 @@ use std::{collections::HashMap, path::PathBuf};
 
 pub use inkwell::context::Context;
 use inkwell::{
+    AddressSpace,
     builder::Builder,
     module::{Linkage, Module},
     targets::{Target, TargetMachine, TargetTriple},
     types::{BasicType, BasicTypeEnum},
     values::{BasicValue, BasicValueEnum, FunctionValue, GlobalValue},
-    AddressSpace,
 };
 
-use ame_common::ScopeStack;
+use ame_common::{Interned, ScopeStack};
 use ame_lexer::LiteralKind;
 use ame_tast::{
     AssignOp, BinOp, TypedAst, TypedExprId, TypedExprKind, TypedStmtId, TypedStmtKind, UnaryOp,
@@ -26,7 +26,7 @@ use crate::ty::{AsFloatPredicate, AsIntPredicate, AsLLVMType};
 pub struct CodeGen<'a, 'ctx> {
     typed_ast: &'a TypedAst,
     nodes: &'a [TypedStmtId],
-    tcx: TypeCtx,
+    tcx: &'a TypeCtx,
 
     locals: ScopeStack<&'a String, BasicValueEnum<'ctx>>,
     fns: ScopeStack<&'a String, FunctionValue<'ctx>>,
@@ -44,7 +44,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     pub fn new(
         typed_ast: &'a TypedAst,
         nodes: &'a [TypedStmtId],
-        tcx: TypeCtx,
+        tcx: &'a TypeCtx,
 
         context: &'ctx Context,
         module: Module<'ctx>,
@@ -160,13 +160,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
                     let var = self
                         .builder
-                        .build_alloca(
-                            std::convert::TryInto::<BasicTypeEnum>::try_into(
-                                ty.resolve(&self.tcx).as_llvm_type(self.context),
-                            )
-                            .unwrap(),
-                            name,
-                        )
+                        .build_alloca(ty.as_basic_llvm_type(self.context, &self.tcx), name)
                         .unwrap();
 
                     if let Some(init_expr) = init_expr {
@@ -368,12 +362,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     |(mut names, mut types), stmt| match self.typed_ast[*stmt].kind() {
                         TypedStmtKind::VarDecl { name, ty, .. } => {
                             names.push(name);
-                            types.push(
-                                ty.resolve(&self.tcx)
-                                    .as_llvm_type(self.context)
-                                    .try_into()
-                                    .unwrap(),
-                            );
+                            types.push(ty.as_basic_llvm_type(self.context, self.tcx).into());
 
                             (names, types)
                         }
@@ -383,7 +372,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     },
                 );
 
-                let ret_ty = return_ty.resolve(&self.tcx).as_llvm_type(self.context);
+                let ret_ty = return_ty.as_any_llvm_type(self.context, self.tcx);
                 let fn_type =
                     if let Ok(ty) = std::convert::TryInto::<BasicTypeEnum>::try_into(ret_ty) {
                         ty.fn_type(&arg_types, *is_variadic)
@@ -500,8 +489,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     fn generate_expr(&mut self, expr: TypedExprId) -> Option<BasicValueEnum<'ctx>> {
         let expr = &self.typed_ast[expr];
 
-        let ty = expr.ty().resolve(&self.tcx);
-        let llvm_ty = ty.as_llvm_type(self.context);
+        let ty = self.tcx.resolve(expr.ty());
+        let llvm_ty = expr.ty().as_any_llvm_type(self.context, self.tcx);
 
         match expr.kind() {
             TypedExprKind::Literal(kind) => match kind {
@@ -510,6 +499,15 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     empty: _,
                     value,
                 } => match ty {
+                    Type::Var(_, Constraint::Integer) => Some(
+                        llvm_ty
+                            .into_int_type()
+                            .const_int(
+                                u64::from_str_radix(value.trim(), *base as u32).unwrap(),
+                                false,
+                            )
+                            .into(),
+                    ),
                     Type::Int(kind) if kind.unsigned() => Some(
                         llvm_ty
                             .into_int_type()
@@ -519,7 +517,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                             )
                             .into(),
                     ),
-                    Type::Int(_) => Some(
+                    Type::Int(_) | Type::Var(_, Constraint::SignedInteger) => Some(
                         llvm_ty
                             .into_int_type()
                             .const_int(
@@ -634,12 +632,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 );
 
                 Some(self.generate_binop(
-                    ty,
+                    expr.ty(),
                     *op,
                     l,
-                    self.typed_ast[*lhs].ty().resolve(&self.tcx),
+                    self.typed_ast[*lhs].ty(),
                     r,
-                    self.typed_ast[*rhs].ty().resolve(&self.tcx),
+                    self.typed_ast[*rhs].ty(),
                 ))
             }
             TypedExprKind::Assign(op, lhs, rhs) => {
@@ -651,7 +649,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 }
                 .into_pointer_value();
 
-                let ty = lhs.ty().resolve(&self.tcx);
+                let ty = lhs.ty();
 
                 match op {
                     AssignOp::Assign => {
@@ -677,9 +675,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                             op.try_into()
                                 .expect("assign case is handled above, otherwise can't panic"),
                             l,
-                            lhs.ty().resolve(&self.tcx),
+                            lhs.ty(),
                             r,
-                            self.typed_ast[*rhs].ty().resolve(&self.tcx),
+                            self.typed_ast[*rhs].ty(),
                         );
 
                         self.builder.build_store(ptr, result).unwrap();
@@ -703,13 +701,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             }
             TypedExprKind::Cast(ty, expr) => {
                 let generated_expr = self.generate_nonvoid_expr(*expr);
-                let llvm_ty =
-                    std::convert::TryInto::<BasicTypeEnum>::try_into(ty.as_llvm_type(self.context))
-                        .unwrap();
+                let llvm_ty = ty.as_basic_llvm_type(self.context, self.tcx);
 
-                Some(match (self.typed_ast[*expr].ty(), ty) {
+                let src_ty = self.tcx.resolve(self.typed_ast[*expr].ty());
+                let dest_ty = self.tcx.resolve(*ty);
+                Some(match (src_ty, dest_ty) {
                     (Type::Int(src), Type::Int(dest)) => {
-                        if src.width() < dest.width() {
+                        if src.width_in_bits() < dest.width_in_bits() {
                             if src.unsigned() {
                                 self.builder
                                     .build_int_z_extend(
@@ -729,7 +727,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                                     .unwrap()
                                     .into()
                             }
-                        } else if src.width() > dest.width() {
+                        } else if src.width_in_bits() > dest.width_in_bits() {
                             self.builder
                                 .build_int_truncate(
                                     generated_expr.into_int_value(),
@@ -743,7 +741,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         }
                     }
                     (Type::Float(src), Type::Float(dest)) => {
-                        if src.width() < dest.width() {
+                        if src.width_in_bits() < dest.width_in_bits() {
                             self.builder
                                 .build_float_ext(
                                     generated_expr.into_float_value(),
@@ -752,7 +750,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                                 )
                                 .unwrap()
                                 .into()
-                        } else if src.width() > dest.width() {
+                        } else if src.width_in_bits() > dest.width_in_bits() {
                             self.builder
                                 .build_float_trunc(
                                     generated_expr.into_float_value(),
@@ -835,7 +833,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         .unwrap()
                         .into(),
                     (Type::Bool, Type::Int(dest)) => {
-                        if dest.width() > 8 {
+                        if dest.width_in_bits() > 8 {
                             // NOTE: always use zero extend because otherwise true becomes -1 if
                             // casted to signed int
                             self.builder
@@ -863,13 +861,17 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     fn generate_binop(
         &mut self,
-        ty: Type,
+        ty: Interned<Type>,
         op: BinOp,
         l: BasicValueEnum<'ctx>,
-        l_ty: Type,
+        l_ty: Interned<Type>,
         r: BasicValueEnum<'ctx>,
-        r_ty: Type,
+        r_ty: Interned<Type>,
     ) -> BasicValueEnum<'ctx> {
+        let ty = self.tcx.resolve(ty);
+        let l_ty = self.tcx.resolve(l_ty);
+        let r_ty = self.tcx.resolve(r_ty);
+
         match ty {
             Type::Int(kind) => {
                 let (l, r) = (l.into_int_value(), r.into_int_value());

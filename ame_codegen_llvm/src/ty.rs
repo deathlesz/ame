@@ -1,35 +1,44 @@
+use ame_common::Interned;
 use ame_tast::BinOp;
-use ame_types::{Constraint, FloatKind, IntKind, Type};
-use inkwell::{context::Context, types::AnyTypeEnum, AddressSpace, FloatPredicate, IntPredicate};
+use ame_types::{Constraint, FloatKind, IntKind, Type, TypeCtx};
+use inkwell::{
+    AddressSpace, FloatPredicate, IntPredicate,
+    context::Context,
+    types::{AnyTypeEnum, BasicTypeEnum},
+};
 
 pub trait AsLLVMType<'ctx> {
-    type Out;
-
-    fn as_llvm_type(&self, ctx: &'ctx Context) -> Self::Out;
+    fn as_any_llvm_type(&self, ctx: &'ctx Context, tcx: &TypeCtx) -> AnyTypeEnum<'ctx>;
+    fn as_basic_llvm_type(&self, ctx: &'ctx Context, tcx: &TypeCtx) -> BasicTypeEnum<'ctx> {
+        self.as_any_llvm_type(ctx, tcx)
+            .try_into()
+            .expect("not a basic type")
+    }
 }
 
-impl<'ctx> AsLLVMType<'ctx> for Type {
-    type Out = AnyTypeEnum<'ctx>;
-
+impl<'ctx> AsLLVMType<'ctx> for Interned<Type> {
     #[inline]
-    fn as_llvm_type(&self, ctx: &'ctx Context) -> Self::Out {
-        match self {
-            Self::Int(kind) => match kind {
+    fn as_any_llvm_type(&self, ctx: &'ctx Context, tcx: &TypeCtx) -> AnyTypeEnum<'ctx> {
+        let ty = tcx.resolve(*self);
+
+        match ty {
+            Type::Int(kind) => match kind {
                 IntKind::Int8 | IntKind::Uint8 => ctx.i8_type().into(),
                 IntKind::Int16 | IntKind::Uint16 => ctx.i16_type().into(),
                 IntKind::Int32 | IntKind::Uint32 => ctx.i32_type().into(),
                 IntKind::Int64 | IntKind::Uint64 => ctx.i64_type().into(),
             },
-            Self::Float(kind) => match kind {
+            Type::Float(kind) => match kind {
                 FloatKind::Float32 => ctx.f32_type().into(),
                 FloatKind::Float64 => ctx.f64_type().into(),
             },
-            Self::Bool => ctx.bool_type().into(),
-            Self::Var(_, Constraint::Integer | Constraint::SignedInteger) => ctx.i32_type().into(),
-            Self::Var(_, Constraint::Float) => ctx.f64_type().into(),
-            Self::String => ctx.ptr_type(AddressSpace::default()).into(), // temporary for now
-            Self::Ref(_) => ctx.ptr_type(AddressSpace::default()).into(),
-            Self::None => ctx.void_type().into(),
+            Type::Bool => ctx.bool_type().into(),
+            Type::Var(_, Constraint::Integer | Constraint::SignedInteger) => ctx.i32_type().into(),
+            Type::Var(_, Constraint::Float) => ctx.f64_type().into(),
+            Type::String => ctx.ptr_type(AddressSpace::default()).into(), // temporary for now
+            Type::Ref(_) => ctx.ptr_type(AddressSpace::default()).into(),
+            // Type::Fn(id) => {}
+            Type::None => ctx.void_type().into(),
 
             other => panic!("cannot lower {other:?} to llvm type"),
         }

@@ -52,6 +52,7 @@ fn main() -> Result<()> {
     );
 
     let mut tcx = TypeCtx::new();
+
     let before = std::time::Instant::now();
     let inferrer = Inferrer::new(&mut tcx, &ast);
     let (typed_ast, typed_stmts) = inferrer
@@ -68,7 +69,7 @@ fn main() -> Result<()> {
     let builder = context.create_builder();
 
     let before = std::time::Instant::now();
-    let mut codegen = CodeGen::new(&typed_ast, &typed_stmts, tcx, &context, module, builder);
+    let mut codegen = CodeGen::new(&typed_ast, &typed_stmts, &tcx, &context, module, builder);
 
     codegen.generate(args.into());
     println!(

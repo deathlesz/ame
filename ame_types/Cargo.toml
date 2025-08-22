@@ -6,3 +6,6 @@ edition.workspace = true
 license.workspace = true
 keywords.workspace = true
 readme.workspace = true
+
+[dependencies]
+ame_common = { path = "../ame_common" }

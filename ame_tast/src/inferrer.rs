@@ -1,7 +1,7 @@
 use ame_ast::{AssignOp, Ast, BinOp, ExprId, ExprKind, StmtId, StmtKind, UnaryOp};
-use ame_common::ScopeStack;
+use ame_common::{Interned, ScopeStack};
 use ame_lexer::LiteralKind;
-use ame_types::{unify, Constraint, Type, TypeCtx, TypeError};
+use ame_types::{Constraint, DefKind, Type, TypeCtx, TypeError};
 
 use crate::{
     TypedAst, TypedExpr, TypedExprId, TypedExprKind, TypedStmt, TypedStmtId, TypedStmtKind,
@@ -11,9 +11,9 @@ type Result<T> = std::result::Result<T, TypeError>;
 
 pub struct Inferrer<'a> {
     tcx: &'a mut TypeCtx,
-    env: ScopeStack<String, Type>,
+    env: ScopeStack<String, Interned<Type>>,
 
-    current_return_ty: Option<Type>,
+    current_return_ty: Option<Interned<Type>>,
 
     ast: &'a Ast,
     typed_ast: TypedAst,
@@ -64,23 +64,26 @@ impl<'a> Inferrer<'a> {
                 let mut arg_tys = Vec::with_capacity(args.len());
                 for arg in args {
                     if let StmtKind::VarDecl { ty, .. } = self.ast[*arg].kind() {
-                        arg_tys.push(
+                        let ty = Type::from_str(
                             ty.as_ref()
-                                .expect("type must be present in function argument")
-                                .into(),
+                                .expect("type must be present in function argument"),
+                            self.tcx,
                         );
+                        arg_tys.push(self.tcx.intern_type(ty));
                     }
                 }
 
-                let fn_ty = Type::Fn {
-                    args: arg_tys,
-                    return_ty: Box::new(
-                        return_ty.as_ref().map(|ty| ty.into()).unwrap_or(Type::None),
-                    ),
-                    is_variadic: *is_variadic,
-                };
+                let return_ty = return_ty
+                    .as_ref()
+                    .map(|ty| Type::from_str(ty, self.tcx))
+                    .unwrap_or(Type::None);
+                let return_ty = self.tcx.intern_type(return_ty);
+                let fn_def_id = self
+                    .tcx
+                    .define_fn(name.clone(), arg_tys, return_ty, *is_variadic);
 
-                self.env.define(name.clone(), fn_ty);
+                self.env
+                    .define(name.clone(), self.tcx.get_def_ty(fn_def_id));
             }
         }
 
@@ -100,18 +103,22 @@ impl<'a> Inferrer<'a> {
                     .transpose()?;
 
                 let inferred_ty = if let Some(init) = &typed_init_expr {
-                    self.typed_ast[*init].ty.clone()
+                    self.typed_ast[*init].ty
                 } else {
-                    Type::var(self.tcx)
+                    let var = self.tcx.var();
+                    self.tcx.intern_type(var)
                 };
 
                 let ty = ty
                     .as_ref()
-                    .map(|ty| ty.into())
-                    .unwrap_or_else(|| inferred_ty.clone());
+                    .map(|ty| {
+                        let ty = Type::from_str(ty, self.tcx);
+                        self.tcx.intern_type(ty)
+                    })
+                    .unwrap_or(inferred_ty);
 
-                unify(&ty, &inferred_ty, self.tcx)?;
-                self.env.define(name.clone(), ty.resolve(self.tcx));
+                self.tcx.unify(ty, inferred_ty)?;
+                self.env.define(name.clone(), ty);
 
                 TypedStmtKind::VarDecl {
                     name: name.clone(),
@@ -132,19 +139,25 @@ impl<'a> Inferrer<'a> {
                 let mut typed_args = Vec::with_capacity(args.len());
                 for arg in args {
                     if let StmtKind::VarDecl { name, ty, .. } = &self.ast[*arg].kind() {
-                        self.env.define(
-                            name.clone(),
+                        let ty = Type::from_str(
                             ty.as_ref()
-                                .expect("type must be present in function argument")
-                                .into(),
+                                .expect("type must be present in function argument"),
+                            self.tcx,
                         );
+                        let ty = self.tcx.intern_type(ty);
+                        self.env.define(name.clone(), ty);
+
                         typed_args.push(self.infer_stmt(*arg)?);
                     }
                 }
 
-                let return_ty = return_ty.as_ref().map(|ty| ty.into()).unwrap_or(Type::None);
+                let return_ty = return_ty
+                    .as_ref()
+                    .map(|ty| Type::from_str(ty, self.tcx))
+                    .unwrap_or(Type::None);
+                let return_ty = self.tcx.intern_type(return_ty);
                 let typed_body = if let Some(stmts) = body {
-                    let prev_return_ty = self.current_return_ty.replace(return_ty.clone());
+                    let prev_return_ty = self.current_return_ty.replace(return_ty);
 
                     let typed_stmts = self.infer_stmts(stmts)?;
 
@@ -172,11 +185,11 @@ impl<'a> Inferrer<'a> {
                     .transpose()?;
                 let return_ty = typed_expr
                     .as_ref()
-                    .map(|expr| self.typed_ast[*expr].ty.clone())
-                    .unwrap_or(Type::None);
+                    .map(|expr| self.typed_ast[*expr].ty)
+                    .unwrap_or_else(|| self.tcx.intern_type(Type::None));
 
                 if let Some(expected) = &self.current_return_ty {
-                    unify(expected, &return_ty, self.tcx)?;
+                    self.tcx.unify(*expected, return_ty)?;
                 }
 
                 TypedStmtKind::Return(typed_expr)
@@ -189,7 +202,8 @@ impl<'a> Inferrer<'a> {
 
                 for (cond, body) in branches {
                     let typed_cond = self.infer_expr(*cond)?;
-                    unify(&self.typed_ast[typed_cond].ty, &Type::Bool, self.tcx)?;
+                    let bool = self.tcx.intern_type(Type::Bool);
+                    self.tcx.unify(self.typed_ast[typed_cond].ty, bool)?;
 
                     self.env.enter();
                     let typed_body = self.infer_stmts(body)?;
@@ -216,7 +230,8 @@ impl<'a> Inferrer<'a> {
             }
             StmtKind::While { cond, body } => {
                 let typed_cond = self.infer_expr(*cond)?;
-                unify(&self.typed_ast[typed_cond].ty, &Type::Bool, self.tcx)?;
+                let bool = self.tcx.intern_type(Type::Bool);
+                self.tcx.unify(self.typed_ast[typed_cond].ty, bool)?;
 
                 self.env.enter();
                 let typed_body = self.infer_stmts(body)?;
@@ -248,7 +263,8 @@ impl<'a> Inferrer<'a> {
 
                 let typed_cond = if let Some(expr) = cond {
                     let typed_cond = self.infer_expr(*expr)?;
-                    unify(&self.typed_ast[typed_cond].ty, &Type::Bool, self.tcx)?;
+                    let bool = self.tcx.intern_type(Type::Bool);
+                    self.tcx.unify(self.typed_ast[typed_cond].ty, bool)?;
 
                     Some(typed_cond)
                 } else {
@@ -286,16 +302,19 @@ impl<'a> Inferrer<'a> {
         let (kind, ty) = match &self.ast[expr].kind() {
             ExprKind::Literal(kind) => {
                 let ty = match kind {
-                    LiteralKind::Int { .. } => Type::var_int(self.tcx),
-                    LiteralKind::Float { .. } => Type::var_float(self.tcx),
+                    LiteralKind::Int { .. } => self.tcx.var_int(),
+                    LiteralKind::Float { .. } => self.tcx.var_float(),
                     LiteralKind::String { .. } => Type::String,
                 };
 
-                (TypedExprKind::Literal(kind.clone()), ty)
+                (
+                    TypedExprKind::Literal(kind.clone()),
+                    self.tcx.intern_type(ty),
+                )
             }
             ExprKind::Variable(name) => {
                 if let Some(ty) = self.env.get(name) {
-                    (TypedExprKind::Variable(name.clone()), ty.clone())
+                    (TypedExprKind::Variable(name.clone()), *ty)
                 } else {
                     panic!("undefined variable")
                 }
@@ -303,28 +322,29 @@ impl<'a> Inferrer<'a> {
             ExprKind::Unary(op, val) => {
                 let typed_val = self.infer_expr(*val)?;
 
+                let ty = self.typed_ast[typed_val].ty;
                 let result_ty = match op {
-                    UnaryOp::Neg => match &self.typed_ast[typed_val].ty {
-                        ty @ Type::Int(kind) if !kind.unsigned() => ty.clone(),
-                        ty @ Type::Var(_, Constraint::SignedInteger) => ty.clone(),
-                        Type::Var(tid, Constraint::Integer) => {
-                            Type::Var(tid.clone(), Constraint::SignedInteger)
-                        }
-                        ty @ Type::Float(_) => ty.clone(),
-                        ty @ Type::Var(_, Constraint::Float) => ty.clone(),
+                    UnaryOp::Neg => match self.tcx.get_ty(ty) {
+                        Type::Int(kind) if !kind.unsigned() => ty,
+                        Type::Var(_, Constraint::SignedInteger) => ty,
+                        Type::Var(tid, Constraint::Integer) => self
+                            .tcx
+                            .intern_type(Type::Var(*tid, Constraint::SignedInteger)),
+                        Type::Float(_) => ty,
+                        Type::Var(_, Constraint::Float) => ty,
                         ty => panic!("cannot negate {ty:?}"),
                     },
                     UnaryOp::Not => {
-                        match &self.typed_ast[typed_val].ty {
+                        match self.tcx.get_ty(ty) {
                             Type::Bool => {}
                             _ => panic!("cannot not"),
                         }
 
-                        Type::Bool
+                        self.tcx.intern_type(Type::Bool)
                     }
-                    UnaryOp::Ref => Type::Ref(Box::new(self.typed_ast[typed_val].ty.clone())),
-                    UnaryOp::Deref => match &self.typed_ast[typed_val].ty {
-                        Type::Ref(ty) => *ty.clone(),
+                    UnaryOp::Ref => self.tcx.intern_type(Type::Ref(ty)),
+                    UnaryOp::Deref => match self.tcx.get_ty(ty) {
+                        Type::Ref(ty) => *ty,
                         _ => panic!("cannot deref"),
                     },
                 };
@@ -334,8 +354,8 @@ impl<'a> Inferrer<'a> {
             ExprKind::Binary(op, lhs, rhs) => {
                 let typed_lhs = self.infer_expr(*lhs)?;
                 let typed_rhs = self.infer_expr(*rhs)?;
-                let typed_lhs_ty = &self.typed_ast[typed_lhs].ty;
-                let typed_rhs_ty = &self.typed_ast[typed_rhs].ty;
+                let typed_lhs_ty = self.typed_ast[typed_lhs].ty;
+                let typed_rhs_ty = self.typed_ast[typed_rhs].ty;
 
                 let result_ty = match op {
                     BinOp::Add
@@ -346,29 +366,31 @@ impl<'a> Inferrer<'a> {
                     | BinOp::BitAnd
                     | BinOp::BitXor
                     | BinOp::BitOr => {
-                        unify(typed_lhs_ty, typed_rhs_ty, self.tcx)?;
+                        self.tcx.unify(typed_lhs_ty, typed_rhs_ty)?;
 
-                        typed_lhs_ty.clone()
+                        typed_lhs_ty
                     }
                     BinOp::Shl | BinOp::Shr => {
                         // TODO: add error for this or modify `TypeError::CannotUnify`
-                        match &typed_lhs_ty {
+                        match self.tcx.get_ty(typed_lhs_ty) {
                             Type::Int(_) => {}
                             _ => panic!("you can shl/shr only by integer values"),
                         }
 
-                        typed_lhs_ty.clone()
+                        typed_lhs_ty
                     }
                     BinOp::Eq | BinOp::Ne | BinOp::Gt | BinOp::Ge | BinOp::Lt | BinOp::Le => {
-                        unify(typed_lhs_ty, typed_rhs_ty, self.tcx)?;
+                        self.tcx.unify(typed_lhs_ty, typed_rhs_ty)?;
 
-                        Type::Bool
+                        self.tcx.intern_type(Type::Bool)
                     }
                     BinOp::And | BinOp::Or => {
-                        unify(typed_lhs_ty, &Type::Bool, self.tcx)?;
-                        unify(typed_rhs_ty, &Type::Bool, self.tcx)?;
+                        let bool = self.tcx.intern_type(Type::Bool);
 
-                        Type::Bool
+                        self.tcx.unify(typed_lhs_ty, bool)?;
+                        self.tcx.unify(typed_rhs_ty, bool)?;
+
+                        bool
                     }
                 };
 
@@ -377,8 +399,8 @@ impl<'a> Inferrer<'a> {
             ExprKind::Assign(op, lhs, rhs) => {
                 let typed_lhs = self.infer_expr(*lhs)?;
                 let typed_rhs = self.infer_expr(*rhs)?;
-                let typed_lhs_ty = &self.typed_ast[typed_lhs].ty;
-                let typed_rhs_ty = &self.typed_ast[typed_rhs].ty;
+                let typed_lhs_ty = self.typed_ast[typed_lhs].ty;
+                let typed_rhs_ty = self.typed_ast[typed_rhs].ty;
 
                 let result_ty = match op {
                     AssignOp::Add
@@ -389,36 +411,39 @@ impl<'a> Inferrer<'a> {
                     | AssignOp::BitAnd
                     | AssignOp::BitXor
                     | AssignOp::BitOr => {
-                        unify(typed_lhs_ty, typed_rhs_ty, self.tcx)?;
+                        self.tcx.unify(typed_lhs_ty, typed_rhs_ty)?;
 
-                        typed_lhs_ty.clone()
+                        typed_lhs_ty
                     }
                     AssignOp::Shl | AssignOp::Shr => {
                         // TODO: add error for this or modify `TypeError::CannotUnify`
-                        match &typed_lhs_ty {
+                        match self.tcx.get_ty(typed_lhs_ty) {
                             Type::Int(_) => {}
                             _ => panic!("you can shl/shr only by integer values"),
                         }
 
-                        typed_lhs_ty.clone()
+                        typed_lhs_ty
                     }
                     AssignOp::Assign => {
-                        unify(typed_lhs_ty, typed_rhs_ty, self.tcx)?;
+                        self.tcx.unify(typed_lhs_ty, typed_rhs_ty)?;
 
-                        typed_lhs_ty.clone()
+                        typed_lhs_ty
                     }
                 };
 
                 (TypedExprKind::Assign(*op, typed_lhs, typed_rhs), result_ty)
             }
             ExprKind::FnCall(name, args) => {
-                if let Some(ty) = self.env.get(name).cloned() {
+                if let Some(ty) = self.env.get(name) {
+                    let ty = self.tcx.get_ty(*ty);
                     match ty {
-                        Type::Fn {
-                            args: arg_tys,
-                            return_ty: ret_ty,
-                            ..
-                        } => {
+                        Type::Fn(id) => {
+                            let DefKind::Fn {
+                                args: arg_tys,
+                                return_ty,
+                                ..
+                            } = self.tcx.get_def(*id).clone();
+
                             let mut typed_args = Vec::with_capacity(args.len());
 
                             // required to still infer types of variadic arguments, but not unify them
@@ -429,13 +454,13 @@ impl<'a> Inferrer<'a> {
                                 let typed_arg = self.infer_expr(*arg)?;
 
                                 if let Some(arg_ty) = arg_ty {
-                                    unify(&self.typed_ast[typed_arg].ty, arg_ty, self.tcx)?;
+                                    self.tcx.unify(self.typed_ast[typed_arg].ty, *arg_ty)?;
                                 }
 
                                 typed_args.push(typed_arg);
                             }
 
-                            (TypedExprKind::FnCall(name.clone(), typed_args), *ret_ty)
+                            (TypedExprKind::FnCall(name.clone(), typed_args), return_ty)
                         }
                         _ => unreachable!("function type is Fn, duh"),
                     }
@@ -444,17 +469,15 @@ impl<'a> Inferrer<'a> {
                 }
             }
             ExprKind::Cast(ty, expr) => {
-                let ty: Type = ty.into();
+                let ty = Type::from_str(ty, self.tcx);
+                let ty = self.tcx.intern_type(ty);
                 let typed_expr = self.infer_expr(*expr)?;
 
-                (TypedExprKind::Cast(ty.clone(), typed_expr), ty)
+                (TypedExprKind::Cast(ty, typed_expr), ty)
             }
             ExprKind::ClassInst(_, _) => todo!(),
         };
 
-        Ok(self.typed_ast.alloc_expr(TypedExpr {
-            kind,
-            ty: ty.resolve(self.tcx),
-        }))
+        Ok(self.typed_ast.alloc_expr(TypedExpr { kind, ty }))
     }
 }

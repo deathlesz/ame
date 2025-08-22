@@ -1,4 +1,4 @@
-use ame_common::{Arena, Id};
+use ame_common::{Arena, Id, Interned};
 use ame_lexer::LiteralKind;
 use ame_types::Type;
 
@@ -59,7 +59,7 @@ impl std::ops::Index<TypedExprId> for TypedAst {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TypedExpr {
     kind: TypedExprKind,
-    ty: Type,
+    ty: Interned<Type>,
 }
 
 impl TypedExpr {
@@ -69,8 +69,8 @@ impl TypedExpr {
     }
 
     #[inline]
-    pub fn ty(&self) -> &Type {
-        &self.ty
+    pub fn ty(&self) -> Interned<Type> {
+        self.ty
     }
 }
 
@@ -82,7 +82,7 @@ pub enum TypedExprKind {
     Binary(BinOp, TypedExprId, TypedExprId),
     Assign(AssignOp, TypedExprId, TypedExprId),
     FnCall(String, Vec<TypedExprId>),
-    Cast(Type, TypedExprId),
+    Cast(Interned<Type>, TypedExprId),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -101,7 +101,7 @@ impl TypedStmt {
 pub enum TypedStmtKind {
     VarDecl {
         name: String,
-        ty: Type,
+        ty: Interned<Type>,
         init_expr: Option<TypedExprId>,
     },
     If {
@@ -116,7 +116,7 @@ pub enum TypedStmtKind {
         name: String,
         args: Vec<TypedStmtId>,
         body: Option<Vec<TypedStmtId>>,
-        return_ty: Type,
+        return_ty: Interned<Type>,
 
         is_extern: bool,
         is_variadic: bool,
