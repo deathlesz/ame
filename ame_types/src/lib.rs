@@ -11,6 +11,7 @@ pub enum Type {
     Bool,
     String,
     Fn(DefId),
+    Class(DefId),
     Ref(Interned<Type>),
     None,
     Other(String), // placeholder for more types later

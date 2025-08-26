@@ -1,13 +1,12 @@
-use ame_common::{HashMap, Interned, Interner};
+use ame_common::{Arena, HashMap, Id, IndexMap, Interned, Interner};
 
 use crate::{Constraint, Type, TypeError, VarId};
 
 #[derive(Debug, Clone)]
 pub struct TypeCtx {
     ty_interner: Interner<Type>,
-    def_interner: Interner<DefKind>,
+    def_arena: Arena<DefKind>,
 
-    name_to_def_id: HashMap<String, DefId>,
     var_id_to_ty: HashMap<VarId, Interned<Type>>,
     var_id: u32,
 }
@@ -17,9 +16,8 @@ impl TypeCtx {
     pub fn new() -> Self {
         Self {
             ty_interner: Interner::default(),
-            def_interner: Interner::default(),
+            def_arena: Arena::new(),
 
-            name_to_def_id: HashMap::default(),
             var_id_to_ty: HashMap::default(),
             var_id: 0,
         }
@@ -37,17 +35,29 @@ impl TypeCtx {
         return_ty: Interned<Type>,
         is_variadic: bool,
     ) -> DefId {
-        let def_kind = DefKind::Fn {
+        let def_kind = DefKind::Fn(FnDef {
+            name,
             args,
             return_ty,
             is_variadic,
-        };
-        let def_id = DefId(self.def_interner.intern(def_kind));
+        });
+        let def_id = DefId(self.def_arena.alloc(def_kind));
 
         let fn_ty = Type::Fn(def_id);
         self.ty_interner.intern(fn_ty);
 
-        self.name_to_def_id.insert(name, def_id);
+        def_id
+    }
+
+    pub fn define_class(&mut self, name: String, fields: Vec<(String, Interned<Type>)>) -> DefId {
+        let def_kind = DefKind::Class(ClassDef {
+            name,
+            fields: fields.into_iter().collect(),
+        });
+        let def_id = DefId(self.def_arena.alloc(def_kind));
+
+        let class_ty = Type::Class(def_id);
+        self.ty_interner.intern(class_ty);
 
         def_id
     }
@@ -59,13 +69,14 @@ impl TypeCtx {
 
     #[inline]
     pub fn get_def(&self, id: DefId) -> &DefKind {
-        &self.def_interner[id.0]
+        &self.def_arena[id.0]
     }
 
     #[inline]
     pub fn get_def_ty(&mut self, id: DefId) -> Interned<Type> {
-        match self.def_interner.get(id.0) {
+        match self.def_arena.get(id.0) {
             DefKind::Fn { .. } => self.ty_interner.intern(Type::Fn(id)),
+            DefKind::Class { .. } => self.ty_interner.intern(Type::Class(id)),
         }
     }
 
@@ -130,6 +141,8 @@ impl TypeCtx {
                 }
             }
             (Type::Ref(ty1), Type::Ref(ty2)) => self.unify(*ty1, *ty2),
+            (Type::Fn(id1), Type::Fn(id2)) if id1 == id2 => Ok(()),
+            (Type::Class(id1), Type::Class(id2)) if id1 == id2 => Ok(()),
             (Type::None, Type::None) => Ok(()),
             (Type::Other(s1), Type::Other(s2)) if s1 == s2 => Ok(()),
 
@@ -164,13 +177,42 @@ impl Default for TypeCtx {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct DefId(Interned<DefKind>);
+pub struct DefId(Id<DefKind>);
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DefKind {
-    Fn {
-        args: Vec<Interned<Type>>,
-        return_ty: Interned<Type>,
-        is_variadic: bool,
-    },
+    Fn(FnDef),
+    Class(ClassDef),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FnDef {
+    pub name: String,
+    pub args: Vec<Interned<Type>>,
+    pub return_ty: Interned<Type>,
+    pub is_variadic: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClassDef {
+    pub name: String,
+    pub fields: IndexMap<String, Interned<Type>>,
+}
+
+impl DefKind {
+    #[inline]
+    pub fn as_fn(self) -> FnDef {
+        match self {
+            Self::Fn(def) => def,
+            _ => panic!("not a fn"),
+        }
+    }
+
+    #[inline]
+    pub fn as_class(self) -> ClassDef {
+        match self {
+            Self::Class(def) => def,
+            _ => panic!("not a class"),
+        }
+    }
 }

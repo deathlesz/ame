@@ -1,7 +1,7 @@
 use ame_ast::{AssignOp, Ast, BinOp, ExprId, ExprKind, StmtId, StmtKind, UnaryOp};
 use ame_common::{Interned, ScopeStack};
 use ame_lexer::LiteralKind;
-use ame_types::{Constraint, DefKind, Type, TypeCtx, TypeError};
+use ame_types::{ClassDef, Constraint, FnDef, Type, TypeCtx, TypeError};
 
 use crate::{
     TypedAst, TypedExpr, TypedExprId, TypedExprKind, TypedStmt, TypedStmtId, TypedStmtKind,
@@ -288,10 +288,23 @@ impl<'a> Inferrer<'a> {
                     body: typed_body,
                 }
             }
-            StmtKind::ClassDecl {
-                name: _name,
-                fields: _fields,
-            } => todo!(),
+            StmtKind::ClassDecl { name, fields } => {
+                let typed_fields: Vec<(String, Interned<Type>)> = fields
+                    .iter()
+                    .map(|(name, ty)| {
+                        let ty = Type::from_str(ty, self.tcx);
+                        (name.clone(), self.tcx.intern_type(ty))
+                    })
+                    .collect();
+
+                let id = self.tcx.define_class(name.clone(), typed_fields.clone());
+                self.env.define(name.clone(), self.tcx.get_def_ty(id));
+
+                TypedStmtKind::ClassDecl {
+                    name: name.clone(),
+                    fields: typed_fields,
+                }
+            }
             StmtKind::ExprStmt(expr) => TypedStmtKind::ExprStmt(self.infer_expr(*expr)?),
         };
 
@@ -438,11 +451,11 @@ impl<'a> Inferrer<'a> {
                     let ty = self.tcx.get_ty(*ty);
                     match ty {
                         Type::Fn(id) => {
-                            let DefKind::Fn {
+                            let FnDef {
                                 args: arg_tys,
                                 return_ty,
                                 ..
-                            } = self.tcx.get_def(*id).clone();
+                            } = self.tcx.get_def(*id).clone().as_fn();
 
                             let mut typed_args = Vec::with_capacity(args.len());
 
@@ -475,7 +488,39 @@ impl<'a> Inferrer<'a> {
 
                 (TypedExprKind::Cast(ty, typed_expr), ty)
             }
-            ExprKind::ClassInst(_, _) => todo!(),
+            ExprKind::ClassInst(name, inst_fields) => {
+                if let Some(&ty) = self.env.get(name) {
+                    let resolved_ty = self.tcx.get_ty(ty);
+
+                    match resolved_ty {
+                        Type::Class(id) => {
+                            let ClassDef { fields, .. } = self.tcx.get_def(*id).clone().as_class();
+
+                            if inst_fields.len() != fields.len() {
+                                panic!("uneven field count");
+                            }
+
+                            let mut typed_fields = Vec::with_capacity(fields.len());
+                            for (field_name, field_expr) in inst_fields {
+                                let typed_field = self.infer_expr(*field_expr)?;
+
+                                if let Some(field_ty) = fields.get(field_name) {
+                                    self.tcx.unify(self.typed_ast[typed_field].ty, *field_ty)?;
+                                } else {
+                                    panic!("unknown field: {field_name}");
+                                }
+
+                                typed_fields.push((field_name.clone(), typed_field));
+                            }
+
+                            (TypedExprKind::ClassInst(name.clone(), typed_fields), ty)
+                        }
+                        _ => unreachable!("class' type is Class, duh"),
+                    }
+                } else {
+                    panic!("class {name} is not defined");
+                }
+            }
         };
 
         Ok(self.typed_ast.alloc_expr(TypedExpr { kind, ty }))

@@ -83,6 +83,7 @@ pub enum TypedExprKind {
     Assign(AssignOp, TypedExprId, TypedExprId),
     FnCall(String, Vec<TypedExprId>),
     Cast(Interned<Type>, TypedExprId),
+    ClassInst(String, Vec<(String, TypedExprId)>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -127,6 +128,10 @@ pub enum TypedStmtKind {
         cond: Option<TypedExprId>,
         action: Option<TypedExprId>,
         body: Vec<TypedStmtId>,
+    },
+    ClassDecl {
+        name: String,
+        fields: Vec<(String, Interned<Type>)>,
     },
     ExprStmt(TypedExprId),
 }

@@ -1,6 +1,6 @@
 use ame_common::Interned;
 use ame_tast::BinOp;
-use ame_types::{Constraint, FloatKind, IntKind, Type, TypeCtx};
+use ame_types::{ClassDef, Constraint, FloatKind, IntKind, Type, TypeCtx};
 use inkwell::{
     AddressSpace, FloatPredicate, IntPredicate,
     context::Context,
@@ -38,6 +38,18 @@ impl<'ctx> AsLLVMType<'ctx> for Interned<Type> {
             Type::String => ctx.ptr_type(AddressSpace::default()).into(), // temporary for now
             Type::Ref(_) => ctx.ptr_type(AddressSpace::default()).into(),
             // Type::Fn(id) => {}
+            Type::Class(id) => {
+                let ClassDef { name, fields } = tcx.get_def(*id).clone().as_class();
+
+                let class = ctx.opaque_struct_type(&name);
+                let fields: Vec<_> = fields
+                    .values()
+                    .map(|v| v.as_basic_llvm_type(ctx, tcx))
+                    .collect();
+                class.set_body(&fields, false);
+
+                class.into()
+            }
             Type::None => ctx.void_type().into(),
 
             other => panic!("cannot lower {other:?} to llvm type"),

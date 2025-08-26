@@ -15,7 +15,7 @@ use ame_lexer::LiteralKind;
 use ame_tast::{
     AssignOp, BinOp, TypedAst, TypedExprId, TypedExprKind, TypedStmtId, TypedStmtKind, UnaryOp,
 };
-use ame_types::{Constraint, Type, TypeCtx};
+use ame_types::{ClassDef, Constraint, Type, TypeCtx};
 
 mod options;
 pub use options::*;
@@ -160,7 +160,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
                     let var = self
                         .builder
-                        .build_alloca(ty.as_basic_llvm_type(self.context, &self.tcx), name)
+                        .build_alloca(ty.as_basic_llvm_type(self.context, self.tcx), name)
                         .unwrap();
 
                     if let Some(init_expr) = init_expr {
@@ -329,6 +329,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     } else {
                         panic!("no current function")
                     }
+                }
+                TypedStmtKind::ClassDecl { .. } => {
+                    // self.fns.define(name, value);
                 }
                 TypedStmtKind::ExprStmt(expr) => {
                     _ = self.generate_expr(*expr); // we don't care if it's void
@@ -850,6 +853,34 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     }
                     _ => panic!("incorrect cast"),
                 })
+            }
+            TypedExprKind::ClassInst(_, inst_fields) => {
+                let llvm_ty = llvm_ty.into_struct_type();
+                let alloca = self.builder.build_alloca(llvm_ty, "alloc_struct").unwrap();
+
+                if let Type::Class(id) = ty {
+                    let ClassDef { fields, .. } = self.tcx.get_def(*id).clone().as_class();
+
+                    for (i, (field_name, _)) in fields.iter().enumerate() {
+                        let expr = inst_fields
+                            .iter()
+                            .find(|(name, _)| name == field_name)
+                            .map(|(_, expr)| *expr)
+                            .expect("must exist");
+
+                        let expr = self.generate_nonvoid_expr(expr);
+                        let ptr = self
+                            .builder
+                            .build_struct_gep(llvm_ty, alloca, i as u32, "set")
+                            .unwrap();
+
+                        self.builder.build_store(ptr, expr).unwrap();
+                    }
+
+                    Some(alloca.into())
+                } else {
+                    unreachable!("class' type is Class")
+                }
             }
         }
     }

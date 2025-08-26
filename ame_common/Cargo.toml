@@ -9,3 +9,4 @@ readme.workspace = true
 
 [dependencies]
 rustc-hash = "2"
+indexmap = "2"
