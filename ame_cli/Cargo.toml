@@ -16,5 +16,6 @@ ame_lexer = { path = "../ame_lexer" }
 ame_ast = { path = "../ame_ast" }
 ame_tast = { path = "../ame_tast" }
 ame_parser = { path = "../ame_parser" }
+ame_codegen = { path = "../ame_codegen" }
 ame_codegen_llvm = { path = "../ame_codegen_llvm" }
 ame_types = { path = "../ame_types" }

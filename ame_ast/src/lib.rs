@@ -1,6 +1,5 @@
-use ame_lexer::{LiteralKind, Token, TokenKind};
-
 use ame_common::{Arena, Id};
+use ame_lexer::{LiteralKind, Token, TokenKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct StmtId(Id<Stmt>);

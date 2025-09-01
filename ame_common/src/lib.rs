@@ -1,6 +1,6 @@
-pub mod arena;
-pub mod interner;
-pub mod scopestack;
+mod arena;
+mod interner;
+mod scopestack;
 
 pub use arena::{Id, IdArena as Arena};
 pub use interner::Interned;

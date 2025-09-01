@@ -1,5 +1,6 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::path::PathBuf;
 
+use ame_codegen::CodeGenCtx;
 pub use inkwell::context::Context;
 use inkwell::{
     AddressSpace,
@@ -7,30 +8,26 @@ use inkwell::{
     module::{Linkage, Module},
     targets::{Target, TargetMachine, TargetTriple},
     types::{BasicType, BasicTypeEnum},
-    values::{BasicValue, BasicValueEnum, FunctionValue, GlobalValue},
+    values::{BasicValue, BasicValueEnum, FunctionValue},
 };
 
-use ame_common::{Interned, ScopeStack};
+use ame_common::Interned;
 use ame_lexer::LiteralKind;
-use ame_tast::{
-    AssignOp, BinOp, TypedAst, TypedExprId, TypedExprKind, TypedStmtId, TypedStmtKind, UnaryOp,
-};
-use ame_types::{ClassDef, Constraint, Type, TypeCtx};
+use ame_tast::{AssignOp, BinOp, TypedExprId, TypedExprKind, TypedStmtId, TypedStmtKind, UnaryOp};
+use ame_types::{ClassDef, Constraint, Type};
 
+mod backend;
 mod options;
-pub use options::*;
-mod ty;
+mod traits;
 
-use crate::ty::{AsFloatPredicate, AsIntPredicate, AsLLVMType};
+pub use crate::options::*;
+use crate::{
+    backend::LLVMBackend,
+    traits::{AsFloatPredicate, AsIntPredicate, AsLLVMType},
+};
 
 pub struct CodeGen<'a, 'ctx> {
-    typed_ast: &'a TypedAst,
-    nodes: &'a [TypedStmtId],
-    tcx: &'a TypeCtx,
-
-    locals: ScopeStack<&'a String, BasicValueEnum<'ctx>>,
-    fns: ScopeStack<&'a String, FunctionValue<'ctx>>,
-    strings: HashMap<String, GlobalValue<'ctx>>,
+    ctx: CodeGenCtx<'a, LLVMBackend<'ctx>>,
 
     context: &'ctx Context,
     module: Module<'ctx>,
@@ -42,22 +39,14 @@ pub struct CodeGen<'a, 'ctx> {
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     #[inline]
     pub fn new(
-        typed_ast: &'a TypedAst,
-        nodes: &'a [TypedStmtId],
-        tcx: &'a TypeCtx,
+        ctx: CodeGenCtx<'a, LLVMBackend<'ctx>>,
 
         context: &'ctx Context,
         module: Module<'ctx>,
         builder: Builder<'ctx>,
     ) -> Self {
         Self {
-            typed_ast,
-            nodes,
-            tcx,
-
-            locals: ScopeStack::new(),
-            fns: ScopeStack::new(),
-            strings: HashMap::new(),
+            ctx,
 
             context,
             module,
@@ -68,7 +57,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     pub fn generate(&mut self, options: CodeGenOptions) {
-        self.generate_stmts(self.nodes);
+        self.generate_stmts(self.ctx.nodes);
         self.module.verify().expect("failed to verify");
 
         Target::initialize_all(&inkwell::targets::InitializationConfig::default());
@@ -146,7 +135,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         let mut returned = false;
         for stmt in stmts {
-            let stmt = &self.typed_ast[*stmt];
+            let stmt = &self.ctx.typed_ast[*stmt];
 
             match stmt.kind() {
                 TypedStmtKind::VarDecl {
@@ -160,7 +149,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
                     let var = self
                         .builder
-                        .build_alloca(ty.as_basic_llvm_type(self.context, self.tcx), name)
+                        .build_alloca(ty.as_basic_llvm_type(self.context, &mut self.ctx), name)
                         .unwrap();
 
                     if let Some(init_expr) = init_expr {
@@ -169,7 +158,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         self.builder.build_store(var, expr).unwrap();
                     }
 
-                    self.locals.define(name, var.as_basic_value_enum());
+                    self.ctx.locals.define(name, var.as_basic_value_enum());
                 }
                 TypedStmtKind::If {
                     branches,
@@ -195,11 +184,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
                         self.builder.position_at_end(do_block);
 
-                        self.locals.enter();
-                        self.fns.enter();
+                        self.ctx.enter_scope();
                         let returned = self.generate_stmts(body);
-                        self.fns.exit();
-                        self.locals.exit();
+                        self.ctx.exit_scope();
 
                         if !returned {
                             let cond_generated = self.generate_nonvoid_expr(*cond);
@@ -220,17 +207,18 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 } => {
                     if let Some(body) = body {
                         let arg_names =
-                            args.iter().map(|stmt| match self.typed_ast[*stmt].kind() {
-                                TypedStmtKind::VarDecl { name, .. } => name,
-                                _ => {
-                                    unreachable!(
-                                        "function arguments are always variable declarations"
-                                    )
-                                }
-                            });
+                            args.iter()
+                                .map(|stmt| match self.ctx.typed_ast[*stmt].kind() {
+                                    TypedStmtKind::VarDecl { name, .. } => name,
+                                    _ => {
+                                        unreachable!(
+                                            "function arguments are always variable declarations"
+                                        )
+                                    }
+                                });
 
                         // will never panic because it was pregenerated earlier
-                        let func = *self.fns.get(name).unwrap();
+                        let func = *self.ctx.fns.get(name.as_str()).unwrap();
 
                         let prev_func = self.current_func;
                         let prev_bb = self.builder.get_insert_block();
@@ -239,23 +227,19 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         let bb = self.context.append_basic_block(func, name);
                         self.builder.position_at_end(bb);
 
-                        self.locals.enter();
-                        self.fns.enter();
+                        self.ctx.enter_scope();
                         for (arg, name) in func.get_params().into_iter().zip(arg_names) {
                             let ptr = self.builder.build_alloca(arg.get_type(), name).unwrap();
                             self.builder.build_store(ptr, arg).unwrap();
 
-                            self.locals.define(name, ptr.as_basic_value_enum());
+                            self.ctx.locals.define(name, ptr.as_basic_value_enum());
                         }
+                        self.ctx.enter_scope();
 
-                        self.locals.enter();
-                        self.fns.enter();
                         self.generate_stmts(body);
 
-                        self.fns.exit();
-                        self.locals.exit();
-                        self.fns.exit();
-                        self.locals.exit();
+                        self.ctx.exit_scope();
+                        self.ctx.exit_scope();
 
                         self.current_func = prev_func;
                         if let Some(prev_bb) = prev_bb {
@@ -286,8 +270,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         let forbody = self.context.append_basic_block(func, "forbody");
                         let forcont = self.context.append_basic_block(func, "forcont");
 
-                        self.locals.enter();
-                        self.fns.enter();
+                        self.ctx.enter_scope();
 
                         if let Some(stmts) = init {
                             self.generate_stmts(stmts);
@@ -322,16 +305,22 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                             }
                         }
 
-                        self.fns.exit();
-                        self.locals.exit();
+                        self.ctx.exit_scope();
 
                         self.builder.position_at_end(forcont);
                     } else {
                         panic!("no current function")
                     }
                 }
-                TypedStmtKind::ClassDecl { .. } => {
-                    // self.fns.define(name, value);
+                TypedStmtKind::ClassDecl { name, fields } => {
+                    let class = self.context.opaque_struct_type(name);
+                    let fields: Vec<_> = fields
+                        .iter()
+                        .map(|(_, ty)| ty.as_basic_llvm_type(self.context, &mut self.ctx))
+                        .collect();
+                    class.set_body(&fields, false);
+
+                    self.ctx.classes.define(name, class);
                 }
                 TypedStmtKind::ExprStmt(expr) => {
                     _ = self.generate_expr(*expr); // we don't care if it's void
@@ -344,7 +333,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     fn generate_fns(&mut self, stmts: &'a [TypedStmtId]) {
         for stmt in stmts {
-            let stmt = &self.typed_ast[*stmt];
+            let stmt = &self.ctx.typed_ast[*stmt];
 
             if let TypedStmtKind::FnDecl {
                 name,
@@ -362,10 +351,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         Vec::with_capacity(args.len()),
                         Vec::with_capacity(args.len()),
                     ),
-                    |(mut names, mut types), stmt| match self.typed_ast[*stmt].kind() {
+                    |(mut names, mut types), stmt| match self.ctx.typed_ast[*stmt].kind() {
                         TypedStmtKind::VarDecl { name, ty, .. } => {
                             names.push(name);
-                            types.push(ty.as_basic_llvm_type(self.context, self.tcx).into());
+                            types.push(ty.as_basic_llvm_type(self.context, &mut self.ctx).into());
 
                             (names, types)
                         }
@@ -375,7 +364,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     },
                 );
 
-                let ret_ty = return_ty.as_any_llvm_type(self.context, self.tcx);
+                let ret_ty = return_ty.as_any_llvm_type(self.context, &mut self.ctx);
                 let fn_type =
                     if let Ok(ty) = std::convert::TryInto::<BasicTypeEnum>::try_into(ret_ty) {
                         ty.fn_type(&arg_types, *is_variadic)
@@ -397,7 +386,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     arg.set_name(name);
                 }
 
-                self.fns.define(name, func);
+                self.ctx.fns.define(name, func);
             }
         }
     }
@@ -427,11 +416,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
             self.builder.position_at_end(then_block);
 
-            self.locals.enter();
-            self.fns.enter();
+            self.ctx.enter_scope();
             let returned = self.generate_stmts(body);
-            self.fns.exit();
-            self.locals.exit();
+            self.ctx.exit_scope();
 
             if !returned {
                 self.builder
@@ -458,11 +445,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         self.builder.position_at_end(then_block);
 
-        self.locals.enter();
-        self.fns.enter();
+        self.ctx.enter_scope();
         let returned = self.generate_stmts(body);
-        self.fns.exit();
-        self.locals.exit();
+        self.ctx.exit_scope();
 
         if !returned {
             self.builder
@@ -473,11 +458,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         if let Some(else_body) = else_body {
             self.builder.position_at_end(else_block.unwrap());
 
-            self.locals.enter();
-            self.fns.enter();
+            self.ctx.enter_scope();
             let returned = self.generate_stmts(else_body);
-            self.fns.exit();
-            self.locals.exit();
+            self.ctx.exit_scope();
 
             if !returned {
                 self.builder
@@ -490,10 +473,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     fn generate_expr(&mut self, expr: TypedExprId) -> Option<BasicValueEnum<'ctx>> {
-        let expr = &self.typed_ast[expr];
+        let expr = &self.ctx.typed_ast[expr];
 
-        let ty = self.tcx.resolve(expr.ty());
-        let llvm_ty = expr.ty().as_any_llvm_type(self.context, self.tcx);
+        let ty = self.ctx.tcx.resolve(expr.ty());
+        let llvm_ty = expr.ty().as_any_llvm_type(self.context, &mut self.ctx);
 
         match expr.kind() {
             TypedExprKind::Literal(kind) => match kind {
@@ -542,7 +525,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         .into(),
                 ),
                 LiteralKind::String { value, .. } => Some({
-                    if let Some(v) = self.strings.get(value) {
+                    if let Some(v) = self.ctx.strings.get(value) {
                         v.as_basic_value_enum()
                     } else {
                         let string = self.context.const_string(value.as_bytes(), true);
@@ -557,7 +540,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         global.set_linkage(Linkage::Private);
                         global.set_initializer(&string);
 
-                        self.strings.insert(value.clone(), global);
+                        self.ctx.strings.insert(value.clone(), global);
 
                         let i8_zero = self.context.i8_type().const_zero();
                         unsafe {
@@ -577,7 +560,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 self.builder
                     .build_load(
                         std::convert::TryInto::<BasicTypeEnum>::try_into(llvm_ty).unwrap(),
-                        self.locals.get(name).unwrap().into_pointer_value(),
+                        self.ctx
+                            .locals
+                            .get(name.as_str())
+                            .unwrap()
+                            .into_pointer_value(),
                         "load",
                     )
                     .unwrap(),
@@ -638,16 +625,16 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     expr.ty(),
                     *op,
                     l,
-                    self.typed_ast[*lhs].ty(),
+                    self.ctx.typed_ast[*lhs].ty(),
                     r,
-                    self.typed_ast[*rhs].ty(),
+                    self.ctx.typed_ast[*rhs].ty(),
                 ))
             }
             TypedExprKind::Assign(op, lhs, rhs) => {
-                let lhs = &self.typed_ast[*lhs];
+                let lhs = &self.ctx.typed_ast[*lhs];
 
                 let ptr = match lhs.kind() {
-                    TypedExprKind::Variable(name) => *self.locals.get(name).unwrap(),
+                    TypedExprKind::Variable(name) => *self.ctx.locals.get(name.as_str()).unwrap(),
                     _ => unreachable!("assignment lhs can only be variable"),
                 }
                 .into_pointer_value();
@@ -680,7 +667,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                             l,
                             lhs.ty(),
                             r,
-                            self.typed_ast[*rhs].ty(),
+                            self.ctx.typed_ast[*rhs].ty(),
                         );
 
                         self.builder.build_store(ptr, result).unwrap();
@@ -689,7 +676,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 }
             }
             TypedExprKind::FnCall(name, args) => {
-                let func = *self.fns.get(name).expect("no func :(");
+                let func = *self.ctx.fns.get(name.as_str()).expect("no func :(");
 
                 let args = args
                     .iter()
@@ -704,10 +691,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             }
             TypedExprKind::Cast(ty, expr) => {
                 let generated_expr = self.generate_nonvoid_expr(*expr);
-                let llvm_ty = ty.as_basic_llvm_type(self.context, self.tcx);
+                let llvm_ty = ty.as_basic_llvm_type(self.context, &mut self.ctx);
 
-                let src_ty = self.tcx.resolve(self.typed_ast[*expr].ty());
-                let dest_ty = self.tcx.resolve(*ty);
+                let src_ty = self.ctx.tcx.resolve(self.ctx.typed_ast[*expr].ty());
+                let dest_ty = self.ctx.tcx.resolve(*ty);
                 Some(match (src_ty, dest_ty) {
                     (Type::Int(src), Type::Int(dest)) => {
                         if src.width_in_bits() < dest.width_in_bits() {
@@ -859,7 +846,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 let alloca = self.builder.build_alloca(llvm_ty, "alloc_struct").unwrap();
 
                 if let Type::Class(id) = ty {
-                    let ClassDef { fields, .. } = self.tcx.get_def(*id).clone().as_class();
+                    let ClassDef { fields, .. } = self.ctx.tcx.get_def(*id).clone().as_class();
 
                     for (i, (field_name, _)) in fields.iter().enumerate() {
                         let expr = inst_fields
@@ -899,9 +886,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         r: BasicValueEnum<'ctx>,
         r_ty: Interned<Type>,
     ) -> BasicValueEnum<'ctx> {
-        let ty = self.tcx.resolve(ty);
-        let l_ty = self.tcx.resolve(l_ty);
-        let r_ty = self.tcx.resolve(r_ty);
+        let ty = self.ctx.tcx.resolve(ty);
+        let l_ty = self.ctx.tcx.resolve(l_ty);
+        let r_ty = self.ctx.tcx.resolve(r_ty);
 
         match ty {
             Type::Int(kind) => {

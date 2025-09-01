@@ -1,16 +1,28 @@
-use ame_common::Interned;
-use ame_tast::BinOp;
-use ame_types::{ClassDef, Constraint, FloatKind, IntKind, Type, TypeCtx};
 use inkwell::{
     AddressSpace, FloatPredicate, IntPredicate,
     context::Context,
     types::{AnyTypeEnum, BasicTypeEnum},
 };
 
+use ame_codegen::CodeGenCtx;
+use ame_common::Interned;
+use ame_tast::BinOp;
+use ame_types::{Constraint, FloatKind, IntKind, Type};
+
+use crate::backend::LLVMBackend;
+
 pub trait AsLLVMType<'ctx> {
-    fn as_any_llvm_type(&self, ctx: &'ctx Context, tcx: &TypeCtx) -> AnyTypeEnum<'ctx>;
-    fn as_basic_llvm_type(&self, ctx: &'ctx Context, tcx: &TypeCtx) -> BasicTypeEnum<'ctx> {
-        self.as_any_llvm_type(ctx, tcx)
+    fn as_any_llvm_type(
+        &self,
+        context: &'ctx Context,
+        ctx: &mut CodeGenCtx<'_, LLVMBackend<'ctx>>,
+    ) -> AnyTypeEnum<'ctx>;
+    fn as_basic_llvm_type(
+        &self,
+        context: &'ctx Context,
+        ctx: &mut CodeGenCtx<'_, LLVMBackend<'ctx>>,
+    ) -> BasicTypeEnum<'ctx> {
+        self.as_any_llvm_type(context, ctx)
             .try_into()
             .expect("not a basic type")
     }
@@ -18,39 +30,38 @@ pub trait AsLLVMType<'ctx> {
 
 impl<'ctx> AsLLVMType<'ctx> for Interned<Type> {
     #[inline]
-    fn as_any_llvm_type(&self, ctx: &'ctx Context, tcx: &TypeCtx) -> AnyTypeEnum<'ctx> {
-        let ty = tcx.resolve(*self);
+    fn as_any_llvm_type(
+        &self,
+        context: &'ctx Context,
+        ctx: &mut CodeGenCtx<'_, LLVMBackend<'ctx>>,
+    ) -> AnyTypeEnum<'ctx> {
+        let ty = ctx.tcx.resolve(*self);
 
         match ty {
             Type::Int(kind) => match kind {
-                IntKind::Int8 | IntKind::Uint8 => ctx.i8_type().into(),
-                IntKind::Int16 | IntKind::Uint16 => ctx.i16_type().into(),
-                IntKind::Int32 | IntKind::Uint32 => ctx.i32_type().into(),
-                IntKind::Int64 | IntKind::Uint64 => ctx.i64_type().into(),
+                IntKind::Int8 | IntKind::Uint8 => context.i8_type().into(),
+                IntKind::Int16 | IntKind::Uint16 => context.i16_type().into(),
+                IntKind::Int32 | IntKind::Uint32 => context.i32_type().into(),
+                IntKind::Int64 | IntKind::Uint64 => context.i64_type().into(),
             },
             Type::Float(kind) => match kind {
-                FloatKind::Float32 => ctx.f32_type().into(),
-                FloatKind::Float64 => ctx.f64_type().into(),
+                FloatKind::Float32 => context.f32_type().into(),
+                FloatKind::Float64 => context.f64_type().into(),
             },
-            Type::Bool => ctx.bool_type().into(),
-            Type::Var(_, Constraint::Integer | Constraint::SignedInteger) => ctx.i32_type().into(),
-            Type::Var(_, Constraint::Float) => ctx.f64_type().into(),
-            Type::String => ctx.ptr_type(AddressSpace::default()).into(), // temporary for now
-            Type::Ref(_) => ctx.ptr_type(AddressSpace::default()).into(),
+            Type::Bool => context.bool_type().into(),
+            Type::Var(_, Constraint::Integer | Constraint::SignedInteger) => {
+                context.i32_type().into()
+            }
+            Type::Var(_, Constraint::Float) => context.f64_type().into(),
+            Type::String => context.ptr_type(AddressSpace::default()).into(), // temporary for now
+            Type::Ref(_) => context.ptr_type(AddressSpace::default()).into(),
             // Type::Fn(id) => {}
             Type::Class(id) => {
-                let ClassDef { name, fields } = tcx.get_def(*id).clone().as_class();
+                let name = ctx.tcx.get_def(*id).clone().as_class().name;
 
-                let class = ctx.opaque_struct_type(&name);
-                let fields: Vec<_> = fields
-                    .values()
-                    .map(|v| v.as_basic_llvm_type(ctx, tcx))
-                    .collect();
-                class.set_body(&fields, false);
-
-                class.into()
+                (*ctx.classes.get(name.as_str()).expect("no class")).into()
             }
-            Type::None => ctx.void_type().into(),
+            Type::None => context.void_type().into(),
 
             other => panic!("cannot lower {other:?} to llvm type"),
         }

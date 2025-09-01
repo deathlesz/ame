@@ -1,5 +1,5 @@
 [package]
-name = "ame_codegen_llvm"
+name = "ame_codegen"
 version = "0.1.0"
 authors.workspace = true
 edition.workspace = true
@@ -8,13 +8,6 @@ keywords.workspace = true
 readme.workspace = true
 
 [dependencies]
-inkwell = { version = "0.6", features = ["llvm18-1"] }
-
 ame_common = { path = "../ame_common" }
-ame_lexer = { path = "../ame_lexer" }
 ame_tast = { path = "../ame_tast" }
 ame_types = { path = "../ame_types" }
-ame_codegen = { path = "../ame_codegen" }
-
-[features]
-dynamic-linking = ["inkwell/llvm18-1-prefer-dynamic"]

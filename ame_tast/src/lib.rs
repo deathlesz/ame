@@ -1,10 +1,11 @@
+pub use ame_ast::{AssignOp, BinOp, UnaryOp};
 use ame_common::{Arena, Id, Interned};
 use ame_lexer::LiteralKind;
 use ame_types::Type;
 
 mod inferrer;
-pub use ame_ast::{AssignOp, BinOp, UnaryOp};
-pub use inferrer::*;
+
+pub use crate::inferrer::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TypedStmtId(Id<TypedStmt>);

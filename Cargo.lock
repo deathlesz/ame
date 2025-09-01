@@ -31,6 +31,7 @@ name = "ame_cli"
 version = "0.1.0"
 dependencies = [
  "ame_ast",
+ "ame_codegen",
  "ame_codegen_llvm",
  "ame_lexer",
  "ame_parser",
@@ -41,9 +42,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "ame_codegen"
+version = "0.1.0"
+dependencies = [
+ "ame_common",
+ "ame_tast",
+ "ame_types",
+]
+
+[[package]]
 name = "ame_codegen_llvm"
 version = "0.1.0"
 dependencies = [
+ "ame_codegen",
  "ame_common",
  "ame_lexer",
  "ame_tast",
